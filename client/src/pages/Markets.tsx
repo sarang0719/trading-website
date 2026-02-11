@@ -153,7 +153,9 @@ export default function Markets() {
                       type="button"
                       size="sm"
                       data-testid={`market-trade-${i.id}`}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         setTicketInstrument(i);
                         setTicketOpen(true);
                       }}
@@ -171,7 +173,7 @@ export default function Markets() {
                       Trade
                     </Button>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
