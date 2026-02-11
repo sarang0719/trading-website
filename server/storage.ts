@@ -1,38 +1,462 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { db } from "./db";
+import {
+  holdings,
+  instruments,
+  latestPrices,
+  newsArticles,
+  orders,
+  portfolios,
+  watchlistItems,
+  watchlists,
+  learnArticles,
+  type CreateOrderRequest,
+  type CreatePortfolioRequest,
+  type CreateWatchlistItemRequest,
+  type CreateWatchlistRequest,
+  type InstrumentsListResponse,
+  type LearnDetailResponse,
+  type LearnListResponse,
+  type NewsFeedResponse,
+  type OrdersListResponse,
+  type Order,
+  type PortfolioSummaryResponse,
+  type WatchlistDetailResponse,
+  type WatchlistsListResponse,
+  type Instrument,
+} from "@shared/schema";
 
-// modify the interface with any CRUD methods
-// you might need
+function num(v: any): number {
+  if (v === null || v === undefined) return 0;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  listInstruments(input?: {
+    q?: string;
+    assetClass?: string;
+    exchange?: string;
+  }): Promise<InstrumentsListResponse>;
+
+  listWatchlists(userId: string): Promise<WatchlistsListResponse>;
+  createWatchlist(userId: string, input: CreateWatchlistRequest): Promise<number>;
+  getWatchlistDetail(userId: string, id: number): Promise<WatchlistDetailResponse | undefined>;
+  addWatchlistItem(userId: string, watchlistId: number, input: CreateWatchlistItemRequest): Promise<void>;
+  removeWatchlistItem(userId: string, watchlistId: number, itemId: number): Promise<void>;
+
+  ensureDefaultPortfolio(userId: string): Promise<number>;
+  createPortfolio(userId: string, input: CreatePortfolioRequest): Promise<number>;
+  getPortfolioSummary(userId: string): Promise<PortfolioSummaryResponse>;
+
+  listOrders(userId: string): Promise<OrdersListResponse>;
+  createOrder(userId: string, input: CreateOrderRequest): Promise<Order>;
+  cancelOrder(userId: string, orderId: number): Promise<Order | undefined>;
+
+  getNews(): Promise<NewsFeedResponse>;
+  listLearn(): Promise<LearnListResponse>;
+  getLearn(id: number): Promise<LearnDetailResponse | undefined>;
+
+  seed(): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+export class DatabaseStorage implements IStorage {
+  async listInstruments(input?: { q?: string; assetClass?: string; exchange?: string }): Promise<Instrument[]> {
+    const where: any[] = [eq(instruments.isActive, true)];
+    if (input?.q) {
+      const q = `%${input.q}%`;
+      where.push(or(ilike(instruments.symbol, q), ilike(instruments.name, q)));
+    }
+    if (input?.assetClass) where.push(eq(instruments.assetClass as any, input.assetClass as any));
+    if (input?.exchange) where.push(eq(instruments.exchange, input.exchange));
 
-  constructor() {
-    this.users = new Map();
+    return db
+      .select()
+      .from(instruments)
+      .where(and(...(where as any)))
+      .orderBy(instruments.exchange, instruments.symbol)
+      .limit(200);
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async listWatchlists(userId: string): Promise<WatchlistsListResponse> {
+    const rows = await db
+      .select({
+        id: watchlists.id,
+        userId: watchlists.userId,
+        name: watchlists.name,
+        createdAt: watchlists.createdAt,
+        itemCount: sql<number>`count(${watchlistItems.id})::int`.as("itemCount"),
+      })
+      .from(watchlists)
+      .leftJoin(watchlistItems, eq(watchlistItems.watchlistId, watchlists.id))
+      .where(eq(watchlists.userId, userId))
+      .groupBy(watchlists.id)
+      .orderBy(desc(watchlists.createdAt));
+    return rows as any;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createWatchlist(userId: string, input: CreateWatchlistRequest): Promise<number> {
+    const [wl] = await db
+      .insert(watchlists)
+      .values({ userId, name: input.name })
+      .returning();
+    return wl.id;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async getWatchlistDetail(userId: string, id: number): Promise<WatchlistDetailResponse | undefined> {
+    const [wl] = await db
+      .select()
+      .from(watchlists)
+      .where(and(eq(watchlists.id, id), eq(watchlists.userId, userId)));
+    if (!wl) return undefined;
+
+    const rows = await db
+      .select({
+        itemId: watchlistItems.id,
+        instrument: instruments,
+        price: latestPrices,
+      })
+      .from(watchlistItems)
+      .innerJoin(instruments, eq(instruments.id, watchlistItems.instrumentId))
+      .leftJoin(latestPrices, eq(latestPrices.instrumentId, instruments.id))
+      .where(eq(watchlistItems.watchlistId, id))
+      .orderBy(instruments.exchange, instruments.symbol);
+
+    return {
+      ...wl,
+      items: rows.map((r) => ({
+        id: r.itemId,
+        instrument: r.instrument,
+        price: r.price ?? undefined,
+      })),
+    };
+  }
+
+  async addWatchlistItem(userId: string, watchlistId: number, input: CreateWatchlistItemRequest): Promise<void> {
+    const [wl] = await db
+      .select({ id: watchlists.id })
+      .from(watchlists)
+      .where(and(eq(watchlists.id, watchlistId), eq(watchlists.userId, userId)));
+    if (!wl) return;
+    await db
+      .insert(watchlistItems)
+      .values({ watchlistId, instrumentId: input.instrumentId as any })
+      .onConflictDoNothing();
+  }
+
+  async removeWatchlistItem(userId: string, watchlistId: number, itemId: number): Promise<void> {
+    const [wl] = await db
+      .select({ id: watchlists.id })
+      .from(watchlists)
+      .where(and(eq(watchlists.id, watchlistId), eq(watchlists.userId, userId)));
+    if (!wl) return;
+    await db
+      .delete(watchlistItems)
+      .where(and(eq(watchlistItems.id, itemId), eq(watchlistItems.watchlistId, watchlistId)));
+  }
+
+  async ensureDefaultPortfolio(userId: string): Promise<number> {
+    const [p] = await db
+      .select()
+      .from(portfolios)
+      .where(eq(portfolios.userId, userId))
+      .orderBy(desc(portfolios.createdAt))
+      .limit(1);
+    if (p) return p.id;
+    const [created] = await db
+      .insert(portfolios)
+      .values({ userId, name: "Main Portfolio", baseCurrency: "INR" })
+      .returning();
+    return created.id;
+  }
+
+  async createPortfolio(userId: string, input: CreatePortfolioRequest): Promise<number> {
+    const [p] = await db
+      .insert(portfolios)
+      .values({
+        userId,
+        name: input.name,
+        baseCurrency: input.baseCurrency ?? "INR",
+      })
+      .returning();
+    return p.id;
+  }
+
+  async getPortfolioSummary(userId: string): Promise<PortfolioSummaryResponse> {
+    const portfolioId = await this.ensureDefaultPortfolio(userId);
+    const [portfolio] = await db.select().from(portfolios).where(eq(portfolios.id, portfolioId));
+
+    const rows = await db
+      .select({
+        holding: holdings,
+        instrument: instruments,
+        price: latestPrices,
+      })
+      .from(holdings)
+      .innerJoin(instruments, eq(instruments.id, holdings.instrumentId))
+      .leftJoin(latestPrices, eq(latestPrices.instrumentId, instruments.id))
+      .where(eq(holdings.portfolioId, portfolioId));
+
+    const enriched = rows.map((r) => {
+      const qty = num(r.holding.quantity);
+      const avg = num(r.holding.avgCost);
+      const px = r.price ? num(r.price.price) : 0;
+      const marketValue = qty * px;
+      const costValue = qty * avg;
+      const pnl = marketValue - costValue;
+      const pnlPct = costValue > 0 ? pnl / costValue : 0;
+      return {
+        holding: r.holding,
+        instrument: r.instrument,
+        price: r.price ?? undefined,
+        marketValue,
+        costValue,
+        pnl,
+        pnlPct,
+      };
+    });
+
+    const marketValue = enriched.reduce((a, b) => a + b.marketValue, 0);
+    const costValue = enriched.reduce((a, b) => a + b.costValue, 0);
+    const totalPnl = marketValue - costValue;
+    const totalPnlPct = costValue > 0 ? totalPnl / costValue : 0;
+
+    const dayPnl = enriched.reduce((a, b) => {
+      const chg = b.price ? num(b.price.changeAbs) : 0;
+      const qty = num(b.holding.quantity);
+      return a + chg * qty;
+    }, 0);
+    const dayBase = marketValue - dayPnl;
+    const dayPnlPct = dayBase > 0 ? dayPnl / dayBase : 0;
+
+    const allocMap = new Map<string, number>();
+    for (const h of enriched) {
+      const k = h.instrument.assetClass;
+      allocMap.set(k, (allocMap.get(k) ?? 0) + h.marketValue);
+    }
+    const allocation = Array.from(allocMap.entries()).map(([assetClass, value]) => ({
+      assetClass: assetClass as any,
+      value,
+      pct: marketValue > 0 ? value / marketValue : 0,
+    }));
+
+    return {
+      portfolio: portfolio!,
+      totals: {
+        marketValue,
+        costValue,
+        totalPnl,
+        totalPnlPct,
+        dayPnl,
+        dayPnlPct,
+      },
+      allocation,
+      holdings: enriched,
+    };
+  }
+
+  async listOrders(userId: string): Promise<OrdersListResponse> {
+    return db
+      .select()
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt))
+      .limit(200);
+  }
+
+  async createOrder(userId: string, input: CreateOrderRequest): Promise<Order> {
+    const portfolioId = await this.ensureDefaultPortfolio(userId);
+    const [order] = await db
+      .insert(orders)
+      .values({
+        userId,
+        portfolioId,
+        instrumentId: input.instrumentId as any,
+        side: input.side as any,
+        type: input.type as any,
+        quantity: input.quantity as any,
+        limitPrice: (input as any).limitPrice ?? null,
+        stopPrice: (input as any).stopPrice ?? null,
+        status: "FILLED" as any,
+        filledPrice: (await this.getLatestPriceNumber(input.instrumentId as any))?.toString() ?? null,
+      })
+      .returning();
+
+    await this.applyFillToHoldings(order);
+    return order;
+  }
+
+  async cancelOrder(userId: string, orderId: number): Promise<Order | undefined> {
+    const [existing] = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)));
+    if (!existing) return undefined;
+    if (existing.status !== "PENDING") return existing as any;
+
+    const [updated] = await db
+      .update(orders)
+      .set({ status: "CANCELLED" as any })
+      .where(eq(orders.id, orderId))
+      .returning();
+    return updated as any;
+  }
+
+  async getNews(): Promise<NewsFeedResponse> {
+    return db.select().from(newsArticles).orderBy(desc(newsArticles.publishedAt)).limit(20);
+  }
+
+  async listLearn(): Promise<LearnListResponse> {
+    return db.select().from(learnArticles).orderBy(learnArticles.category, learnArticles.title).limit(50);
+  }
+
+  async getLearn(id: number): Promise<LearnDetailResponse | undefined> {
+    const [a] = await db.select().from(learnArticles).where(eq(learnArticles.id, id));
+    return a;
+  }
+
+  private async getLatestPriceNumber(instrumentId: number): Promise<number | undefined> {
+    const [p] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, instrumentId));
+    if (!p) return undefined;
+    return num(p.price);
+  }
+
+  private async applyFillToHoldings(order: Order): Promise<void> {
+    const qty = num(order.quantity);
+    const px = num(order.filledPrice);
+    const signedQty = order.side === "BUY" ? qty : -qty;
+
+    const [existing] = await db
+      .select()
+      .from(holdings)
+      .where(and(eq(holdings.portfolioId, order.portfolioId), eq(holdings.instrumentId, order.instrumentId)));
+
+    if (!existing) {
+      if (signedQty <= 0) return;
+      await db.insert(holdings).values({
+        portfolioId: order.portfolioId,
+        instrumentId: order.instrumentId,
+        quantity: String(signedQty),
+        avgCost: String(px),
+      });
+      return;
+    }
+
+    const oldQty = num(existing.quantity);
+    const oldAvg = num(existing.avgCost);
+    const newQty = oldQty + signedQty;
+    if (newQty <= 0) {
+      await db
+        .update(holdings)
+        .set({ quantity: "0", avgCost: "0" })
+        .where(eq(holdings.id, existing.id));
+      return;
+    }
+
+    let newAvg = oldAvg;
+    if (order.side === "BUY") {
+      const newCost = oldQty * oldAvg + qty * px;
+      newAvg = newCost / newQty;
+    }
+    await db
+      .update(holdings)
+      .set({ quantity: String(newQty), avgCost: String(newAvg) })
+      .where(eq(holdings.id, existing.id));
+  }
+
+  async seed(): Promise<void> {
+    const existing = await db.select({ id: instruments.id }).from(instruments).limit(1);
+    if (existing.length > 0) return;
+
+    const seededInstruments: Omit<Instrument, "id">[] = [
+      { symbol: "RELIANCE", exchange: "NSE", name: "Reliance Industries Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
+      { symbol: "TCS", exchange: "NSE", name: "Tata Consultancy Services", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
+      { symbol: "INFY", exchange: "NSE", name: "Infosys Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
+      { symbol: "HDFCBANK", exchange: "NSE", name: "HDFC Bank Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
+      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true },
+      { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true },
+      { symbol: "SPY", exchange: "NYSEARCA", name: "SPDR S&P 500 ETF Trust", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true },
+      { symbol: "USDINR", exchange: "FX", name: "US Dollar / Indian Rupee", assetClass: "FOREX" as any, currency: "INR", country: "IN", isActive: true },
+      { symbol: "EURUSD", exchange: "FX", name: "Euro / US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true },
+    ];
+
+    const inserted = await db.insert(instruments).values(seededInstruments as any).returning();
+
+    const priceRows = inserted.map((inst) => {
+      const base = inst.exchange === "NSE" ? 1000 : inst.exchange === "FX" ? 80 : 150;
+      const price = base + Math.random() * base * 0.2;
+      const changeAbs = (Math.random() - 0.5) * base * 0.02;
+      const changePct = (changeAbs / (price - changeAbs)) * 100;
+      return {
+        instrumentId: inst.id,
+        asOf: new Date(),
+        price: String(price),
+        changeAbs: String(changeAbs),
+        changePct: String(changePct),
+      };
+    });
+    await db.insert(latestPrices).values(priceRows as any);
+
+    await db.insert(newsArticles).values([
+      {
+        source: "Market Brief",
+        title: "Global markets mixed ahead of key inflation data",
+        url: "https://example.com/news/global-markets-inflation",
+        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
+        summary:
+          "Investors are watching inflation prints and central bank commentary for clues on the next move in rates.",
+        imageUrl: null,
+        tags: ["markets", "macro"],
+      },
+      {
+        source: "Business Wire",
+        title: "Tech leads as earnings season picks up pace",
+        url: "https://example.com/news/tech-earnings-season",
+        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 6),
+        summary:
+          "Large-cap tech names moved higher as companies reported results and issued forward guidance.",
+        imageUrl: null,
+        tags: ["earnings", "technology"],
+      },
+      {
+        source: "FinLearn",
+        title: "What is a limit order? A practical guide",
+        url: "https://example.com/news/limit-orders-guide",
+        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 24),
+        summary:
+          "A limit order lets you choose the price you’re willing to buy or sell at. Here’s how it works.",
+        imageUrl: null,
+        tags: ["orders", "basics"],
+      },
+    ] as any);
+
+    await db.insert(learnArticles).values([
+      {
+        slug: "risk-and-return-basics",
+        title: "Risk and Return: The Basics",
+        level: "Beginner",
+        category: "Foundations",
+        content:
+          "Every investment involves trade-offs. Higher expected returns usually come with higher risk.\\n\\nKey ideas:\\n- Diversification\\n- Time horizon\\n- Volatility vs. permanent loss\\n\\nStart simple: avoid over-concentration and invest consistently.",
+      },
+      {
+        slug: "how-to-read-candles",
+        title: "How to Read Candlestick Charts",
+        level: "Beginner",
+        category: "Charts",
+        content:
+          "Candlesticks show open, high, low, close for a timeframe.\\n\\nTips:\\n- Focus on trend\\n- Use volume for confirmation\\n- Avoid overusing indicators",
+      },
+      {
+        slug: "asset-allocation-101",
+        title: "Asset Allocation 101",
+        level: "Intermediate",
+        category: "Portfolio",
+        content:
+          "Asset allocation is how you split your money across assets (stocks, bonds, cash, etc.).\\n\\nA practical approach:\\n- Decide your risk level\\n- Rebalance periodically\\n- Keep costs low",
+      },
+    ] as any);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
