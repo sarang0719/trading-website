@@ -102,7 +102,7 @@ export default function Dashboard() {
                 const isUp = (h.price?.changePct ?? 0) >= 0;
 
                 return (
-                  <div key={h.instrument.id} className="group flex items-center justify-between p-4 rounded-2xl hover:bg-secondary/30 transition-colors border border-transparent hover:border-border/50">
+                  <Link key={h.instrument.id} href={`/app/markets/${h.instrument.id}`} className="group flex items-center justify-between p-4 rounded-2xl hover:bg-secondary/30 transition-colors border border-transparent hover:border-border/50 cursor-pointer">
                     <div className="flex items-center gap-4 min-w-[180px]">
                       <Avatar className="h-10 w-10">
                         <AvatarImage src={h.instrument.imageUrl} />
@@ -142,7 +142,7 @@ export default function Dashboard() {
                         {isUp ? "+" : ""}{fmtPct(Number(h.price?.changePct))}
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>

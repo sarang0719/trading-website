@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "wouter";
 import AppShell from "@/components/AppShell";
 import Seo from "@/components/Seo";
 import { useInstruments } from "@/hooks/use-instruments";
@@ -120,13 +121,15 @@ export default function Markets() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
               {(instruments.data ?? []).map((i: any) => (
-                <div
+                <Link
                   key={i.id}
+                  href={`/app/markets/${i.id}`}
                   data-testid={`market-instrument-${i.id}`}
                   className="
                     glass rounded-3xl border border-border/60 p-4 shadow-sm
                     transition-all duration-300 ease-out
                     hover:-translate-y-0.5 hover:shadow-md hover:bg-background/60
+                    cursor-pointer
                   "
                 >
                   <div className="flex items-start justify-between gap-3">

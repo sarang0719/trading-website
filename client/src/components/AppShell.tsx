@@ -8,8 +8,9 @@ import {
   ListChecks,
   Sparkles,
   Wallet,
+  LogOut
 } from "lucide-react";
-import ThemeToggle from "@/components/ThemeToggle";
+import ThemeToggle from "./ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
