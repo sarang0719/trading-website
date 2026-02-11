@@ -6,32 +6,29 @@ import { useWatchlists } from "@/hooks/use-watchlists";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError, redirectToLogin } from "@/lib/auth-utils";
 import StatPill from "@/components/StatPill";
-import GradientCard from "@/components/GradientCard";
 import EmptyState from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { ArrowRight, BadgeIndianRupee, BarChart3, Newspaper, Plus, Sparkles, TriangleAlert } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
+import { ArrowRight, BarChart3, Newspaper, Plus, Sparkles, TriangleAlert, TrendingUp, TrendingDown } from "lucide-react";
+import { AreaChart, Area, ResponsiveContainer, Tooltip as ReTooltip } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
-function fmtInr(n?: number) {
+function fmtUsd(n?: number) {
   if (typeof n !== "number" || Number.isNaN(n)) return "—";
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", { 
+    style: "currency", 
+    currency: "USD", 
+    maximumFractionDigits: n < 1 ? 4 : 2 
+  }).format(n);
 }
+
 function fmtPct(n?: number) {
   if (typeof n !== "number" || Number.isNaN(n)) return "—";
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(2)}%`;
 }
-function toneFor(n?: number) {
-  if (typeof n !== "number") return "neutral" as const;
-  if (n > 0) return "good" as const;
-  if (n < 0) return "bad" as const;
-  return "neutral" as const;
-}
-
-const ALLOC_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -40,13 +37,8 @@ export default function Dashboard() {
   const watchlists = useWatchlists();
 
   const p = portfolio.data as any;
-
   const totals = p?.totals;
-  const allocation = (p?.allocation ?? []).map((a: any) => ({
-    name: a.assetClass,
-    value: a.value,
-    pct: a.pct,
-  }));
+  const holdings = p?.holdings ?? [];
 
   function handle401(err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
@@ -58,358 +50,156 @@ export default function Dashboard() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="A premium snapshot of your paper portfolio, watchlists and the market tape."
+      subtitle="Institutional-grade market tracking and paper portfolio management."
     >
-      <Seo title="Dashboard • Aurum Paper" description="Portfolio summary, allocation, watchlists and market news." />
+      <Seo title="Dashboard • Aurum Paper" description="Crypto-first fintech dashboard." />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-5 lg:gap-7">
-        <GradientCard
-          title="Portfolio Pulse"
-          subtitle="Market value, P&L and allocation"
-          icon={<BarChart3 className="h-5 w-5 text-primary" />}
-          tone="primary"
-          data-testid="dashboard-portfolio-card"
-        >
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-[78px] rounded-2xl" />
-              ))}
-              <Skeleton className="md:col-span-2 h-[240px] rounded-2xl" />
-              <Skeleton className="md:col-span-2 h-[240px] rounded-2xl" />
-            </div>
-          ) : portfolio.isError ? (
-            <EmptyState
-              data-testid="dashboard-portfolio-error"
-              icon={<TriangleAlert className="h-6 w-6 text-destructive" />}
-              title="Couldn’t load portfolio"
-              description="Your session may have expired or the backend route isn’t wired yet."
-              action={
-                <Button
-                  type="button"
-                  onClick={() => {
-                    handle401(portfolio.error);
-                    portfolio.refetch();
-                  }}
-                  data-testid="dashboard-portfolio-retry"
-                  className="rounded-2xl"
-                >
-                  Retry
-                </Button>
-              }
-            />
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <StatPill
-                data-testid="stat-market-value"
-                label="Market Value"
-                value={fmtInr(totals?.marketValue)}
-                hint="Estimated"
-                tone="primary"
-              />
-              <StatPill
-                data-testid="stat-day-pnl"
-                label="Day P&L"
-                value={fmtInr(totals?.dayPnl)}
-                hint={fmtPct(totals?.dayPnlPct)}
-                tone={toneFor(totals?.dayPnl)}
-              />
-              <StatPill
-                data-testid="stat-total-pnl"
-                label="Total P&L"
-                value={fmtInr(totals?.totalPnl)}
-                hint={fmtPct(totals?.totalPnlPct)}
-                tone={toneFor(totals?.totalPnl)}
-              />
-              <StatPill
-                data-testid="stat-cost-value"
-                label="Cost Value"
-                value={fmtInr(totals?.costValue)}
-                hint="Capital deployed"
-                tone="neutral"
-              />
-
-              <div className="md:col-span-2 glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Allocation</div>
-                  <div className="text-xs text-muted-foreground">By asset class</div>
-                </div>
-
-                <div className="mt-3 h-[210px]">
-                  {allocation.length ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <ReTooltip
-                          contentStyle={{
-                            borderRadius: 16,
-                            border: "1px solid hsl(var(--border) / 0.7)",
-                            background: "hsl(var(--card) / 0.85)",
-                            backdropFilter: "blur(12px)",
-                          }}
-                        />
-                        <Pie data={allocation} dataKey="value" nameKey="name" innerRadius={62} outerRadius={84} paddingAngle={3}>
-                          {allocation.map((_e: any, idx: number) => (
-                            <Cell key={`cell-${idx}`} fill={ALLOC_COLORS[idx % ALLOC_COLORS.length]} />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full grid place-items-center text-sm text-muted-foreground">
-                      No allocation data yet.
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {allocation.slice(0, 4).map((a: any, idx: number) => (
-                    <div key={a.name} className="flex items-center gap-2 text-xs">
-                      <span
-                        className="h-2.5 w-2.5 rounded-full"
-                        style={{ background: ALLOC_COLORS[idx % ALLOC_COLORS.length] }}
-                      />
-                      <span className="truncate">{a.name}</span>
-                      <span className="ml-auto text-muted-foreground">{a.pct?.toFixed?.(1) ?? a.pct}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="md:col-span-2 glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Holdings</div>
-                  <div className="flex items-center gap-2">
-                    <Link
-                      href="/app/orders/new"
-                      data-testid="dashboard-order-cta"
-                      className="
-                        inline-flex items-center justify-center gap-2
-                        rounded-2xl px-3 py-2 text-xs font-semibold
-                        bg-gradient-to-r from-primary to-primary/85
-                        text-primary-foreground
-                        shadow-md shadow-primary/20
-                        hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5
-                        active:translate-y-0
-                        transition-all duration-300 ease-out
-                      "
-                    >
-                      <Plus className="h-4 w-4" />
-                      New order
-                    </Link>
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_350px] gap-6 lg:gap-8">
+        <div className="space-y-6 lg:space-y-8">
+          {/* Wallet Header */}
+          <section className="glass rounded-[2rem] p-6 lg:p-8">
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Your Wallet</div>
+                <div className="flex items-baseline gap-3">
+                  <h2 className="text-4xl md:text-5xl font-bold tracking-tighter">
+                    {fmtUsd(totals?.marketValue)}
+                  </h2>
+                  <div className={cn(
+                    "flex items-center gap-1 text-sm font-bold px-2 py-0.5 rounded-full",
+                    (totals?.dayPnl ?? 0) >= 0 ? "text-accent bg-accent/10" : "text-destructive bg-destructive/10"
+                  )}>
+                    {(totals?.dayPnl ?? 0) >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                    {fmtPct(totals?.dayPnlPct)}
                   </div>
                 </div>
+              </div>
 
-                <div className="mt-3 space-y-2">
-                  {(p?.holdings ?? []).slice(0, 6).map((h: any) => {
-                    const pnl = h?.pnl;
-                    const pnlTone = pnl > 0 ? "text-accent" : pnl < 0 ? "text-destructive" : "text-muted-foreground";
-                    return (
-                      <div
-                        key={h?.holding?.id}
-                        className={cn(
-                          "rounded-2xl border border-border/60 bg-background/40 p-3",
-                          "transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md",
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold truncate">
-                              {h?.instrument?.symbol} <span className="text-muted-foreground font-normal">• {h?.instrument?.exchange}</span>
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">{h?.instrument?.name}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold">{fmtInr(h?.marketValue)}</div>
-                            <div className={cn("text-xs font-medium", pnlTone)}>
-                              {fmtInr(pnl)} <span className="opacity-80">({fmtPct(h?.pnlPct)})</span>
-                            </div>
-                          </div>
+              <div className="flex gap-4">
+                {holdings.slice(0, 3).map((h: any) => (
+                  <div key={h.instrument.id} className="flex items-center gap-3 bg-secondary/50 rounded-2xl px-4 py-2 border border-border/50">
+                    <Avatar className="h-6 w-6">
+                      <AvatarImage src={h.instrument.imageUrl} />
+                      <AvatarFallback className="text-[10px]">{h.instrument.symbol[0]}</AvatarFallback>
+                    </Avatar>
+                    <div className="text-sm font-bold">{h.holding.quantity} {h.instrument.symbol}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {/* Market Overview */}
+          <section className="glass rounded-[2rem] p-6 lg:p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold font-sans">Market Overview</h3>
+              <Link href="/app/markets" className="text-xs font-bold text-primary hover:underline">More &gt;</Link>
+            </div>
+
+            <div className="space-y-4">
+              {holdings.map((h: any) => {
+                const sparkData = (h.price?.sparkline ?? []).map((v: string, i: number) => ({ value: Number(v), time: i }));
+                const isUp = (h.price?.changePct ?? 0) >= 0;
+
+                return (
+                  <div key={h.instrument.id} className="group flex items-center justify-between p-4 rounded-2xl hover:bg-secondary/30 transition-colors border border-transparent hover:border-border/50">
+                    <div className="flex items-center gap-4 min-w-[180px]">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src={h.instrument.imageUrl} />
+                        <AvatarFallback>{h.instrument.symbol[0]}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <div className="font-bold flex items-center gap-2">
+                          {h.instrument.symbol} <span className="text-[10px] text-muted-foreground uppercase tracking-widest px-1.5 py-0.5 bg-secondary rounded">Binance</span>
                         </div>
+                        <div className="text-xs text-muted-foreground">{h.instrument.name}</div>
                       </div>
-                    );
-                  })}
-
-                  {(p?.holdings ?? []).length === 0 ? (
-                    <div className="rounded-2xl border border-border/60 bg-background/40 p-4 text-sm text-muted-foreground">
-                      No holdings yet. Place a paper order to begin.
                     </div>
-                  ) : null}
-                </div>
-              </div>
+
+                    <div className="hidden md:block flex-1 max-w-[120px] h-10 mx-8">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={sparkData}>
+                          <defs>
+                            <linearGradient id={`grad-${h.instrument.id}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <Area 
+                            type="monotone" 
+                            dataKey="value" 
+                            stroke={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} 
+                            fill={`url(#grad-${h.instrument.id})`}
+                            strokeWidth={2}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="font-bold">{fmtUsd(Number(h.price?.price))}</div>
+                      <div className={cn("text-xs font-bold", isUp ? "text-accent" : "text-destructive")}>
+                        {isUp ? "+" : ""}{fmtPct(Number(h.price?.changePct))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </GradientCard>
+          </section>
+        </div>
 
-        <div className="space-y-5 lg:space-y-7">
-          <GradientCard
-            title="Watchlists"
-            subtitle="Track your edge—fast"
-            icon={<BadgeIndianRupee className="h-5 w-5 text-accent" />}
-            tone="accent"
-            data-testid="dashboard-watchlists-card"
-          >
-            {watchlists.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-12 rounded-2xl" />
-                ))}
-              </div>
-            ) : watchlists.isError ? (
-              <div className="rounded-2xl border border-border/60 bg-background/40 p-4 text-sm text-muted-foreground">
-                Couldn’t load watchlists.
-                <div className="mt-3">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => watchlists.refetch()}
-                    data-testid="dashboard-watchlists-retry"
-                    className="rounded-2xl"
-                  >
-                    Retry
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(watchlists.data as any[] | undefined)?.slice(0, 5)?.map((w: any) => (
-                  <Link
-                    key={w.id}
-                    href={`/app/watchlists/${w.id}`}
-                    data-testid={`watchlist-link-${w.id}`}
-                    className="
-                      group flex items-center justify-between gap-3
-                      rounded-2xl border border-border/60 bg-background/40 p-3
-                      transition-all duration-300 ease-out
-                      hover:-translate-y-0.5 hover:shadow-md hover:bg-background/55
-                      focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/15
-                    "
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">{w.name}</div>
-                      <div className="text-xs text-muted-foreground">{w.itemCount} instruments</div>
-                    </div>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform duration-300 group-hover:translate-x-0.5" />
-                  </Link>
-                ))}
-
-                <div className="pt-2">
-                  <Link
-                    href="/app/watchlists"
-                    data-testid="dashboard-watchlists-viewall"
-                    className="
-                      inline-flex items-center gap-2 text-sm font-semibold text-primary
-                      hover:underline underline-offset-4
-                    "
-                  >
-                    Manage watchlists <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </div>
-            )}
-          </GradientCard>
-
-          <GradientCard
-            title="Market Tape"
-            subtitle="Curated headlines (MVP feed)"
-            icon={<Newspaper className="h-5 w-5 text-primary" />}
-            tone="neutral"
-            data-testid="dashboard-news-card"
-          >
-            {news.isLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-16 rounded-2xl" />
-                ))}
-              </div>
-            ) : news.isError ? (
-              <div className="rounded-2xl border border-border/60 bg-background/40 p-4 text-sm text-muted-foreground">
-                Couldn’t load news.
-                <div className="mt-3">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => news.refetch()}
-                    data-testid="dashboard-news-retry"
-                    className="rounded-2xl"
-                  >
-                    Retry
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(news.data ?? []).slice(0, 5).map((a: any) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    data-testid={`news-open-${a.id}`}
-                    onClick={() => window.open(a.url, "_blank")}
-                    className="
-                      w-full text-left
-                      rounded-2xl border border-border/60 bg-background/40 p-3
-                      transition-all duration-300 ease-out
-                      hover:-translate-y-0.5 hover:shadow-md hover:bg-background/55
-                      focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-primary/15
-                    "
-                  >
-                    <div className="text-sm font-semibold line-clamp-2">{a.title}</div>
-                    <div className="mt-1 text-xs text-muted-foreground flex items-center justify-between gap-3">
-                      <span>{a.source}</span>
-                      <span className="opacity-80">{new Date(a.publishedAt).toLocaleString()}</span>
-                    </div>
-                  </button>
-                ))}
-
-                <div className="pt-2">
-                  <Link
-                    href="/app/markets"
-                    data-testid="dashboard-markets"
-                    className="
-                      inline-flex items-center gap-2 text-sm font-semibold text-primary
-                      hover:underline underline-offset-4
-                    "
-                  >
-                    Explore markets <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </div>
-            )}
-          </GradientCard>
-
-          <GradientCard
-            title="AI Insights"
-            subtitle="Streaming, concise, useful"
-            icon={<Sparkles className="h-5 w-5 text-chart-4" />}
-            tone="primary"
-            data-testid="dashboard-ai-card"
-          >
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-4">
-              <div className="text-sm font-semibold">Try a prompt:</div>
-              <ul className="mt-2 text-sm text-muted-foreground list-disc pl-5 space-y-1">
-                <li>“Scan my portfolio and highlight concentration risk.”</li>
-                <li>“Summarize today’s biggest market themes.”</li>
-                <li>“Give me a paper trade checklist for a breakout setup.”</li>
-              </ul>
-              <div className="mt-4">
+        {/* Sidebar content */}
+        <div className="space-y-6 lg:space-y-8">
+          <section className="glass rounded-[2rem] p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Watchlists</h3>
+              <Plus className="h-4 w-4 text-muted-foreground cursor-pointer" />
+            </div>
+            
+            <div className="space-y-3">
+              {(watchlists.data as any[] | undefined)?.slice(0, 3)?.map((w: any) => (
                 <Link
-                  href="/app/insights"
-                  data-testid="dashboard-open-insights"
-                  className="
-                    inline-flex items-center justify-center gap-2
-                    rounded-2xl px-4 py-2.5 text-sm font-semibold
-                    bg-gradient-to-r from-primary to-primary/85
-                    text-primary-foreground
-                    shadow-lg shadow-primary/20
-                    hover:shadow-xl hover:shadow-primary/25 hover:-translate-y-0.5
-                    active:translate-y-0
-                    transition-all duration-300 ease-out
-                  "
+                  key={w.id}
+                  href={`/app/watchlists/${w.id}`}
+                  className="flex items-center justify-between p-3 rounded-xl bg-secondary/50 border border-border/50 hover:-translate-y-0.5 transition-transform"
                 >
-                  Open AI Insights <ArrowRight className="h-4 w-4" />
+                  <div className="font-bold text-sm">{w.name}</div>
+                  <div className="text-[10px] font-bold text-muted-foreground">{w.itemCount} items</div>
                 </Link>
-              </div>
+              ))}
             </div>
-          </GradientCard>
+          </section>
+
+          <section className="glass rounded-[2rem] p-6 bg-primary/5 border-primary/20">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-8 w-8 rounded-lg bg-primary/20 grid place-items-center">
+                <Sparkles className="h-4 w-4 text-primary" />
+              </div>
+              <h3 className="font-bold">AI Predictions</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">Stay ahead with institutional-grade insights driven by our neural prediction engine.</p>
+            <Link href="/app/insights">
+              <Button className="w-full rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90">
+                View Analysis
+              </Button>
+            </Link>
+          </section>
+
+          <section className="glass rounded-[2rem] p-6">
+             <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">Market Insight</h3>
+             <div className="space-y-4">
+                {(news.data ?? []).slice(0, 3).map((a: any) => (
+                  <div key={a.id} className="group cursor-pointer">
+                    <div className="text-[13px] font-bold line-clamp-2 group-hover:text-primary transition-colors">{a.title}</div>
+                    <div className="text-[10px] text-muted-foreground mt-1 flex items-center justify-between">
+                      <span>{a.source}</span>
+                      <span>2h ago</span>
+                    </div>
+                  </div>
+                ))}
+             </div>
+          </section>
         </div>
       </div>
     </AppShell>

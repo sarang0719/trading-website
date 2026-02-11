@@ -48,8 +48,7 @@ export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 
 // =========================================================
-// TRADING MVP DATA MODEL
-// (MVP scope: watchlists, paper portfolio, prices, holdings)
+// TRADING DATA MODEL
 // =========================================================
 
 export const assetClassEnum = pgEnum("asset_class", [
@@ -58,22 +57,12 @@ export const assetClassEnum = pgEnum("asset_class", [
   "ETF",
   "MUTUAL_FUND",
   "FOREX",
+  "CRYPTO",
 ]);
 
 export const orderSideEnum = pgEnum("order_side", ["BUY", "SELL"]);
-
-export const orderTypeEnum = pgEnum("order_type", [
-  "MARKET",
-  "LIMIT",
-  "STOP_LOSS",
-]);
-
-export const orderStatusEnum = pgEnum("order_status", [
-  "PENDING",
-  "FILLED",
-  "CANCELLED",
-  "REJECTED",
-]);
+export const orderTypeEnum = pgEnum("order_type", ["MARKET", "LIMIT", "STOP_LOSS"]);
+export const orderStatusEnum = pgEnum("order_status", ["PENDING", "FILLED", "CANCELLED", "REJECTED"]);
 
 export const instruments = pgTable(
   "instruments",
@@ -86,6 +75,7 @@ export const instruments = pgTable(
     currency: varchar("currency", { length: 8 }).notNull(),
     country: varchar("country", { length: 2 }).notNull(),
     isActive: boolean("is_active").notNull().default(true),
+    imageUrl: text("image_url"),
   },
   (t) => [uniqueIndex("instruments_symbol_exchange_unique").on(t.symbol, t.exchange)],
 );
@@ -100,6 +90,7 @@ export const latestPrices = pgTable(
     price: numeric("price", { precision: 18, scale: 6 }).notNull(),
     changeAbs: numeric("change_abs", { precision: 18, scale: 6 }),
     changePct: numeric("change_pct", { precision: 9, scale: 4 }),
+    sparkline: numeric("sparkline", { precision: 18, scale: 6 }).array(),
   },
   (t) => [uniqueIndex("latest_prices_instrument_unique").on(t.instrumentId)],
 );
@@ -140,7 +131,7 @@ export const portfolios = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 64 }).notNull(),
-    baseCurrency: varchar("base_currency", { length: 8 }).notNull().default("INR"),
+    baseCurrency: varchar("base_currency", { length: 8 }).notNull().default("USD"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (t) => [index("portfolios_user_id_idx").on(t.userId)],
@@ -159,9 +150,7 @@ export const holdings = pgTable(
     quantity: numeric("quantity", { precision: 18, scale: 6 }).notNull().default("0"),
     avgCost: numeric("avg_cost", { precision: 18, scale: 6 }).notNull().default("0"),
   },
-  (t) => [
-    uniqueIndex("holdings_portfolio_instrument_unique").on(t.portfolioId, t.instrumentId),
-  ],
+  (t) => [uniqueIndex("holdings_portfolio_instrument_unique").on(t.portfolioId, t.instrumentId)],
 );
 
 export const orders = pgTable(
@@ -186,10 +175,7 @@ export const orders = pgTable(
     filledPrice: numeric("filled_price", { precision: 18, scale: 6 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (t) => [
-    index("orders_user_id_idx").on(t.userId),
-    index("orders_portfolio_id_idx").on(t.portfolioId),
-  ],
+  (t) => [index("orders_user_id_idx").on(t.userId)],
 );
 
 export const newsArticles = pgTable(
@@ -220,41 +206,12 @@ export const learnArticles = pgTable(
   (t) => [uniqueIndex("learn_slug_unique").on(t.slug)],
 );
 
-// =========================================================
-// ZOD INSERT SCHEMAS + EXPLICIT API TYPES
-// =========================================================
+export const insertInstrumentSchema = createInsertSchema(instruments).omit({ id: true });
+export const insertWatchlistSchema = createInsertSchema(watchlists).omit({ id: true, createdAt: true });
+export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit({ id: true, createdAt: true });
+export const insertPortfolioSchema = createInsertSchema(portfolios).omit({ id: true, createdAt: true });
+export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, status: true, filledPrice: true });
 
-export const insertInstrumentSchema = createInsertSchema(instruments).omit({
-  id: true,
-});
-
-export const insertWatchlistSchema = createInsertSchema(watchlists).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertPortfolioSchema = createInsertSchema(portfolios).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertOrderSchema = createInsertSchema(orders).omit({
-  id: true,
-  createdAt: true,
-  status: true,
-  filledPrice: true,
-});
-
-export const insertLearnArticleSchema = createInsertSchema(learnArticles).omit({
-  id: true,
-});
-
-// Base table types
 export type Instrument = typeof instruments.$inferSelect;
 export type LatestPrice = typeof latestPrices.$inferSelect;
 export type Watchlist = typeof watchlists.$inferSelect;
@@ -265,15 +222,6 @@ export type Order = typeof orders.$inferSelect;
 export type NewsArticle = typeof newsArticles.$inferSelect;
 export type LearnArticle = typeof learnArticles.$inferSelect;
 
-// Requests
-export type CreateWatchlistRequest = z.infer<typeof insertWatchlistSchema>;
-export type CreateWatchlistItemRequest = z.infer<typeof insertWatchlistItemSchema>;
-export type CreatePortfolioRequest = z.infer<typeof insertPortfolioSchema>;
-export type UpdatePortfolioRequest = Partial<CreatePortfolioRequest>;
-export type CreateOrderRequest = z.infer<typeof insertOrderSchema>;
-export type CreateLearnArticleRequest = z.infer<typeof insertLearnArticleSchema>;
-
-// Responses
 export type InstrumentsListResponse = Instrument[];
 export type WatchlistsListResponse = (Watchlist & { itemCount: number })[];
 export type WatchlistDetailResponse = Watchlist & {
@@ -295,7 +243,7 @@ export type PortfolioSummaryResponse = {
     dayPnlPct: number;
   };
   allocation: Array<{
-    assetClass: typeof assetClassEnum.enumValues[number];
+    assetClass: string;
     value: number;
     pct: number;
   }>;
@@ -314,10 +262,3 @@ export type OrdersListResponse = Order[];
 export type NewsFeedResponse = NewsArticle[];
 export type LearnListResponse = LearnArticle[];
 export type LearnDetailResponse = LearnArticle;
-
-// Utility
-export interface PaginatedResponse<T> {
-  items: T[];
-  nextCursor?: string;
-  total?: number;
-}

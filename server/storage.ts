@@ -165,7 +165,7 @@ export class DatabaseStorage implements IStorage {
     if (p) return p.id;
     const [created] = await db
       .insert(portfolios)
-      .values({ userId, name: "Main Portfolio", baseCurrency: "INR" })
+      .values({ userId, name: "Main Portfolio", baseCurrency: "USD" })
       .returning();
     return created.id;
   }
@@ -176,7 +176,7 @@ export class DatabaseStorage implements IStorage {
       .values({
         userId,
         name: input.name,
-        baseCurrency: input.baseCurrency ?? "INR",
+        baseCurrency: input.baseCurrency ?? "USD",
       })
       .returning();
     return p.id;
@@ -369,30 +369,30 @@ export class DatabaseStorage implements IStorage {
     if (existing.length > 0) return;
 
     const seededInstruments: Omit<Instrument, "id">[] = [
-      { symbol: "RELIANCE", exchange: "NSE", name: "Reliance Industries Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
-      { symbol: "TCS", exchange: "NSE", name: "Tata Consultancy Services", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
-      { symbol: "INFY", exchange: "NSE", name: "Infosys Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
-      { symbol: "HDFCBANK", exchange: "NSE", name: "HDFC Bank Ltd", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true },
-      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true },
-      { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true },
-      { symbol: "SPY", exchange: "NYSEARCA", name: "SPDR S&P 500 ETF Trust", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true },
-      { symbol: "USDINR", exchange: "FX", name: "US Dollar / Indian Rupee", assetClass: "FOREX" as any, currency: "INR", country: "IN", isActive: true },
-      { symbol: "EURUSD", exchange: "FX", name: "Euro / US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true },
+      { symbol: "BTC", exchange: "BINANCE", name: "Bitcoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bitcoin-btc-logo.png" },
+      { symbol: "ETH", exchange: "BINANCE", name: "Ethereum", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png" },
+      { symbol: "BNB", exchange: "BINANCE", name: "Binance Coin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png" },
+      { symbol: "DOGE", exchange: "BINANCE", name: "Dogecoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/dogecoin-doge-logo.png" },
+      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "RELIANCE", exchange: "NSE", name: "Reliance Industries", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
     ];
 
     const inserted = await db.insert(instruments).values(seededInstruments as any).returning();
 
     const priceRows = inserted.map((inst) => {
-      const base = inst.exchange === "NSE" ? 1000 : inst.exchange === "FX" ? 80 : 150;
+      const base = inst.assetClass === "CRYPTO" ? 10000 : 150;
       const price = base + Math.random() * base * 0.2;
-      const changeAbs = (Math.random() - 0.5) * base * 0.02;
-      const changePct = (changeAbs / (price - changeAbs)) * 100;
+      const changeAbs = (Math.random() - 0.5) * base * 0.05;
+      const changePct = (changeAbs / price) * 100;
+      const sparkline = Array.from({ length: 20 }, () => (price * (0.95 + Math.random() * 0.1)).toString());
+      
       return {
         instrumentId: inst.id,
         asOf: new Date(),
         price: String(price),
         changeAbs: String(changeAbs),
         changePct: String(changePct),
+        sparkline,
       };
     });
     await db.insert(latestPrices).values(priceRows as any);
@@ -400,60 +400,12 @@ export class DatabaseStorage implements IStorage {
     await db.insert(newsArticles).values([
       {
         source: "Market Brief",
-        title: "Global markets mixed ahead of key inflation data",
-        url: "https://example.com/news/global-markets-inflation",
-        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-        summary:
-          "Investors are watching inflation prints and central bank commentary for clues on the next move in rates.",
+        title: "BTC Hits New High Amid Institutional Inflow",
+        url: "https://example.com/btc-news",
+        publishedAt: new Date(),
+        summary: "Bitcoin price action shows strength as more ETFs go live.",
         imageUrl: null,
-        tags: ["markets", "macro"],
-      },
-      {
-        source: "Business Wire",
-        title: "Tech leads as earnings season picks up pace",
-        url: "https://example.com/news/tech-earnings-season",
-        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 6),
-        summary:
-          "Large-cap tech names moved higher as companies reported results and issued forward guidance.",
-        imageUrl: null,
-        tags: ["earnings", "technology"],
-      },
-      {
-        source: "FinLearn",
-        title: "What is a limit order? A practical guide",
-        url: "https://example.com/news/limit-orders-guide",
-        publishedAt: new Date(Date.now() - 1000 * 60 * 60 * 24),
-        summary:
-          "A limit order lets you choose the price you’re willing to buy or sell at. Here’s how it works.",
-        imageUrl: null,
-        tags: ["orders", "basics"],
-      },
-    ] as any);
-
-    await db.insert(learnArticles).values([
-      {
-        slug: "risk-and-return-basics",
-        title: "Risk and Return: The Basics",
-        level: "Beginner",
-        category: "Foundations",
-        content:
-          "Every investment involves trade-offs. Higher expected returns usually come with higher risk.\\n\\nKey ideas:\\n- Diversification\\n- Time horizon\\n- Volatility vs. permanent loss\\n\\nStart simple: avoid over-concentration and invest consistently.",
-      },
-      {
-        slug: "how-to-read-candles",
-        title: "How to Read Candlestick Charts",
-        level: "Beginner",
-        category: "Charts",
-        content:
-          "Candlesticks show open, high, low, close for a timeframe.\\n\\nTips:\\n- Focus on trend\\n- Use volume for confirmation\\n- Avoid overusing indicators",
-      },
-      {
-        slug: "asset-allocation-101",
-        title: "Asset Allocation 101",
-        level: "Intermediate",
-        category: "Portfolio",
-        content:
-          "Asset allocation is how you split your money across assets (stocks, bonds, cash, etc.).\\n\\nA practical approach:\\n- Decide your risk level\\n- Rebalance periodically\\n- Keep costs low",
+        tags: ["crypto", "btc"],
       },
     ] as any);
   }
