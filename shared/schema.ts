@@ -223,6 +223,10 @@ export type NewsArticle = typeof newsArticles.$inferSelect;
 export type LearnArticle = typeof learnArticles.$inferSelect;
 
 export type InstrumentsListResponse = Instrument[];
+export type InstrumentDetailResponse = {
+  instrument: Instrument;
+  price?: LatestPrice;
+};
 export type WatchlistsListResponse = (Watchlist & { itemCount: number })[];
 export type WatchlistDetailResponse = Watchlist & {
   items: Array<{

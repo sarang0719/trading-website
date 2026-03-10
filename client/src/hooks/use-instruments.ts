@@ -33,3 +33,18 @@ export function useInstruments(params?: InstrumentsListInput) {
     },
   });
 }
+
+export function useInstrumentDetail(id?: number) {
+  return useQuery({
+    queryKey: [api.instruments.get.path, id],
+    enabled: !!id,
+    queryFn: async () => {
+      const url = api.instruments.get.path.replace(":id", String(id));
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(`Failed to fetch instrument detail`);
+      const json = await res.json();
+      return json as any;
+    },
+    refetchInterval: 5000, // Refresh every 5 seconds for live data
+  });
+}

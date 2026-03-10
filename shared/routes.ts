@@ -8,6 +8,7 @@ import {
   type NewsArticle,
   type Order,
   type PortfolioSummaryResponse,
+  type InstrumentDetailResponse,
   type WatchlistDetailResponse,
   type WatchlistsListResponse,
   type InstrumentsListResponse,
@@ -44,6 +45,14 @@ export const api = {
         .optional(),
       responses: {
         200: z.custom<InstrumentsListResponse>(),
+      },
+    },
+    get: {
+      method: "GET" as const,
+      path: "/api/instruments/:id" as const,
+      responses: {
+        200: z.custom<InstrumentDetailResponse>(),
+        404: errorSchemas.notFound,
       },
     },
   },

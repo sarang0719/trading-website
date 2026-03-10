@@ -15,6 +15,7 @@ import {
   type CreateWatchlistItemRequest,
   type CreateWatchlistRequest,
   type InstrumentsListResponse,
+  type InstrumentDetailResponse,
   type LearnDetailResponse,
   type LearnListResponse,
   type NewsFeedResponse,
@@ -38,6 +39,7 @@ export interface IStorage {
     assetClass?: string;
     exchange?: string;
   }): Promise<InstrumentsListResponse>;
+  getInstrumentDetail(id: number): Promise<InstrumentDetailResponse | undefined>;
 
   listWatchlists(userId: string): Promise<WatchlistsListResponse>;
   createWatchlist(userId: string, input: CreateWatchlistRequest): Promise<number>;
@@ -76,6 +78,18 @@ export class DatabaseStorage implements IStorage {
       .where(and(...(where as any)))
       .orderBy(instruments.exchange, instruments.symbol)
       .limit(200);
+  }
+
+  async getInstrumentDetail(id: number): Promise<InstrumentDetailResponse | undefined> {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, id));
+    if (!inst) return undefined;
+
+    const [price] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, id));
+
+    return {
+      instrument: inst,
+      price: price ?? undefined,
+    };
   }
 
   async listWatchlists(userId: string): Promise<WatchlistsListResponse> {
@@ -365,37 +379,72 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seed(): Promise<void> {
-    const existing = await db.select({ id: instruments.id }).from(instruments).limit(1);
-    if (existing.length > 0) return;
-
     const seededInstruments: Omit<Instrument, "id">[] = [
-      { symbol: "BTC", exchange: "BINANCE", name: "Bitcoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bitcoin-btc-logo.png" },
-      { symbol: "ETH", exchange: "BINANCE", name: "Ethereum", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png" },
-      { symbol: "BNB", exchange: "BINANCE", name: "Binance Coin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/binance-coin-bnb-logo.png" },
-      { symbol: "DOGE", exchange: "BINANCE", name: "Dogecoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/dogecoin-doge-logo.png" },
-      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      // Top US Stocks
+      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/apple.com" },
+      { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/microsoft.com" },
+      { symbol: "GOOGL", exchange: "NASDAQ", name: "Alphabet Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/abc.xyz" },
+      { symbol: "AMZN", exchange: "NASDAQ", name: "Amazon.com Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/amazon.com" },
+      { symbol: "NVDA", exchange: "NASDAQ", name: "NVIDIA Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/nvidia.com" },
+      { symbol: "META", exchange: "NASDAQ", name: "Meta Platforms Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/meta.com" },
+      { symbol: "TSLA", exchange: "NASDAQ", name: "Tesla, Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/tesla.com" },
+      { symbol: "NFLX", exchange: "NASDAQ", name: "Netflix, Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/netflix.com" },
+
+      // Top Cryptos
+      { symbol: "BTCUSDT", exchange: "BINANCE", name: "Bitcoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bitcoin-btc-logo.png" },
+      { symbol: "ETHUSDT", exchange: "BINANCE", name: "Ethereum", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png" },
+      { symbol: "BNBUSDT", exchange: "BINANCE", name: "BNB", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bnb-bnb-logo.png" },
+      { symbol: "SOLUSDT", exchange: "BINANCE", name: "Solana", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/solana-sol-logo.png" },
+      { symbol: "XRPUSDT", exchange: "BINANCE", name: "XRP", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/xrp-xrp-logo.png" },
+      { symbol: "DOGEUSDT", exchange: "BINANCE", name: "Dogecoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/dogecoin-doge-logo.png" },
+      { symbol: "ADAUSDT", exchange: "BINANCE", name: "Cardano", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/cardano-ada-logo.png" },
+      { symbol: "AVAXUSDT", exchange: "BINANCE", name: "Avalanche", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/avalanche-avax-logo.png" },
+      { symbol: "LINKUSDT", exchange: "BINANCE", name: "Chainlink", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/chainlink-link-logo.png" },
+
+      // Indian Stocks
       { symbol: "RELIANCE", exchange: "NSE", name: "Reliance Industries", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "TCS", exchange: "NSE", name: "Tata Consultancy Services", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "HDFCBANK", exchange: "NSE", name: "HDFC Bank", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "INFY", exchange: "NSE", name: "Infosys", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "ICICIBANK", exchange: "NSE", name: "ICICI Bank", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "SBIN", exchange: "NSE", name: "State Bank of India", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+
+      // ETFs
+      { symbol: "SPY", exchange: "NYSE", name: "SPDR S&P 500 ETF Trust", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "QQQ", exchange: "NASDAQ", name: "Invesco QQQ Trust", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "VTI", exchange: "NYSE", name: "Vanguard Total Stock Market ETF", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+
+      // Mutual Funds (US specific mutual funds available on Alpha Vantage)
+      { symbol: "VFIAX", exchange: "MUTUAL", name: "Vanguard 500 Index Fund Admiral Shares", assetClass: "MUTUAL_FUND" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "FXAIX", exchange: "MUTUAL", name: "Fidelity 500 Index Fund", assetClass: "MUTUAL_FUND" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+
+      // FOREX
+      { symbol: "EURUSD", exchange: "FOREX", name: "Euro / US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "GBPUSD", exchange: "FOREX", name: "British Pound / US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "UK", isActive: true, imageUrl: null },
+      { symbol: "USDJPY", exchange: "FOREX", name: "US Dollar / Japanese Yen", assetClass: "FOREX" as any, currency: "JPY", country: "JP", isActive: true, imageUrl: null },
     ];
 
-    const inserted = await db.insert(instruments).values(seededInstruments as any).returning();
+    for (const inst of seededInstruments) {
+      const existing = await db.select().from(instruments).where(eq(instruments.symbol, inst.symbol));
+      if (existing.length === 0) {
+        const [inserted] = await db.insert(instruments).values(inst as any).returning();
 
-    const priceRows = inserted.map((inst) => {
-      const base = inst.assetClass === "CRYPTO" ? 10000 : 150;
-      const price = base + Math.random() * base * 0.2;
-      const changeAbs = (Math.random() - 0.5) * base * 0.05;
-      const changePct = (changeAbs / price) * 100;
-      const sparkline = Array.from({ length: 20 }, () => (price * (0.95 + Math.random() * 0.1)).toString());
-      
-      return {
-        instrumentId: inst.id,
-        asOf: new Date(),
-        price: String(price),
-        changeAbs: String(changeAbs),
-        changePct: String(changePct),
-        sparkline,
-      };
-    });
-    await db.insert(latestPrices).values(priceRows as any);
+        const base = inserted.assetClass === "CRYPTO" ? 10000 : 150;
+        const price = base + Math.random() * base * 0.2;
+        const changeAbs = (Math.random() - 0.5) * base * 0.05;
+        const changePct = (changeAbs / price) * 100;
+        const sparkline = Array.from({ length: 20 }, () => (price * (0.95 + Math.random() * 0.1)).toString());
+
+        await db.insert(latestPrices).values({
+          instrumentId: inserted.id,
+          asOf: new Date(),
+          price: String(price),
+          changeAbs: String(changeAbs),
+          changePct: String(changePct),
+          sparkline,
+        } as any);
+      }
+    }
 
     await db.insert(newsArticles).values([
       {

@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { startBackgroundTasks } from "./background";
 
 const app = express();
 const httpServer = createServer(app);
@@ -60,6 +61,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const path = await import("path");
+  const { migrate } = await import("drizzle-orm/pglite/migrator");
+  const { db } = await import("./db");
+  await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "migrations") });
+  startBackgroundTasks();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
@@ -94,7 +101,6 @@ app.use((req, res, next) => {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
     },
     () => {
       log(`serving on port ${port}`);

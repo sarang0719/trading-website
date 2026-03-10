@@ -22,6 +22,13 @@ export async function registerRoutes(
     res.json(instruments);
   });
 
+  app.get(api.instruments.get.path, async (req, res) => {
+    const id = Number(req.params.id);
+    const detail = await storage.getInstrumentDetail(id);
+    if (!detail) return res.status(404).json({ message: "Instrument not found" });
+    res.json(detail);
+  });
+
   app.get(api.watchlists.list.path, isAuthenticated, async (req: any, res) => {
     const userId = req.user.claims.sub as string;
     const watchlists = await storage.listWatchlists(userId);
