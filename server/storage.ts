@@ -10,6 +10,7 @@ import {
   watchlistItems,
   watchlists,
   learnArticles,
+  users,
   type CreateOrderRequest,
   type CreatePortfolioRequest,
   type CreateWatchlistItemRequest,
@@ -25,6 +26,9 @@ import {
   type WatchlistDetailResponse,
   type WatchlistsListResponse,
   type Instrument,
+  type LatestPrice,
+  type User,
+  type UpsertUser,
 } from "@shared/schema";
 
 function num(v: any): number {
@@ -34,6 +38,9 @@ function num(v: any): number {
 }
 
 export interface IStorage {
+  getUser(id: string): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: UpsertUser): Promise<User>;
   listInstruments(input?: {
     q?: string;
     assetClass?: string;
@@ -63,7 +70,22 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async listInstruments(input?: { q?: string; assetClass?: string; exchange?: string }): Promise<Instrument[]> {
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, username));
+    return user;
+  }
+
+  async createUser(insertUser: UpsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    return user;
+  }
+
+  async listInstruments(input?: { q?: string; assetClass?: string; exchange?: string }): Promise<(Instrument & { price?: LatestPrice })[]> {
     const where: any[] = [eq(instruments.isActive, true)];
     if (input?.q) {
       const q = `%${input.q}%`;
@@ -72,12 +94,21 @@ export class DatabaseStorage implements IStorage {
     if (input?.assetClass) where.push(eq(instruments.assetClass as any, input.assetClass as any));
     if (input?.exchange) where.push(eq(instruments.exchange, input.exchange));
 
-    return db
-      .select()
+    const rows = await db
+      .select({
+        instrument: instruments,
+        price: latestPrices,
+      })
       .from(instruments)
+      .leftJoin(latestPrices, eq(instruments.id, latestPrices.instrumentId))
       .where(and(...(where as any)))
       .orderBy(instruments.exchange, instruments.symbol)
       .limit(200);
+
+    return rows.map((r) => ({
+      ...r.instrument,
+      price: r.price ?? undefined,
+    }));
   }
 
   async getInstrumentDetail(id: number): Promise<InstrumentDetailResponse | undefined> {
@@ -389,17 +420,28 @@ export class DatabaseStorage implements IStorage {
       { symbol: "META", exchange: "NASDAQ", name: "Meta Platforms Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/meta.com" },
       { symbol: "TSLA", exchange: "NASDAQ", name: "Tesla, Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/tesla.com" },
       { symbol: "NFLX", exchange: "NASDAQ", name: "Netflix, Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/netflix.com" },
+      { symbol: "AMD", exchange: "NASDAQ", name: "Advanced Micro Devices", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/amd.com" },
+      { symbol: "INTC", exchange: "NASDAQ", name: "Intel Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/intel.com" },
+      { symbol: "TSM", exchange: "NYSE", name: "Taiwan Semiconductor", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/tsmc.com" },
+      { symbol: "DIS", exchange: "NYSE", name: "The Walt Disney Co.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/thewaltdisneycompany.com" },
+      { symbol: "CRM", exchange: "NYSE", name: "Salesforce, Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/salesforce.com" },
+      { symbol: "PYPL", exchange: "NASDAQ", name: "PayPal Holdings", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/paypal.com" },
+      { symbol: "UBER", exchange: "NASDAQ", name: "Uber Technologies", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/uber.com" },
+      { symbol: "WMT", exchange: "NYSE", name: "Walmart Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/walmart.com" },
+      { symbol: "XOM", exchange: "NYSE", name: "Exxon Mobil Corp.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/exxonmobil.com" },
+      { symbol: "JPM", exchange: "NYSE", name: "JPMorgan Chase & Co.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/jpmorganchase.com" },
 
-      // Top Cryptos
-      { symbol: "BTCUSDT", exchange: "BINANCE", name: "Bitcoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bitcoin-btc-logo.png" },
-      { symbol: "ETHUSDT", exchange: "BINANCE", name: "Ethereum", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png" },
-      { symbol: "BNBUSDT", exchange: "BINANCE", name: "BNB", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/bnb-bnb-logo.png" },
-      { symbol: "SOLUSDT", exchange: "BINANCE", name: "Solana", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/solana-sol-logo.png" },
-      { symbol: "XRPUSDT", exchange: "BINANCE", name: "XRP", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/xrp-xrp-logo.png" },
-      { symbol: "DOGEUSDT", exchange: "BINANCE", name: "Dogecoin", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/dogecoin-doge-logo.png" },
-      { symbol: "ADAUSDT", exchange: "BINANCE", name: "Cardano", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/cardano-ada-logo.png" },
-      { symbol: "AVAXUSDT", exchange: "BINANCE", name: "Avalanche", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/avalanche-avax-logo.png" },
-      { symbol: "LINKUSDT", exchange: "BINANCE", name: "Chainlink", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://cryptologos.cc/logos/chainlink-link-logo.png" },
+      // Top Cryptos & Commodities
+      { symbol: "BTCUSDT",  exchange: "BINANCE", name: "Bitcoin",   assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/btc@2x.png" },
+      { symbol: "ETHUSDT",  exchange: "BINANCE", name: "Ethereum",  assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/eth@2x.png" },
+      { symbol: "BNBUSDT",  exchange: "BINANCE", name: "BNB",       assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/bnb@2x.png" },
+      { symbol: "SOLUSDT",  exchange: "BINANCE", name: "Solana",    assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/sol@2x.png" },
+      { symbol: "XRPUSDT",  exchange: "BINANCE", name: "XRP",       assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/xrp@2x.png" },
+      { symbol: "DOGEUSDT", exchange: "BINANCE", name: "Dogecoin",  assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/doge@2x.png" },
+      { symbol: "ADAUSDT",  exchange: "BINANCE", name: "Cardano",   assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ada@2x.png" },
+      { symbol: "AVAXUSDT", exchange: "BINANCE", name: "Avalanche", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/avax@2x.png" },
+      { symbol: "LINKUSDT", exchange: "BINANCE", name: "Chainlink", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/link@2x.png" },
+      { symbol: "PAXGUSDT", exchange: "BINANCE", name: "Gold (PAXG)", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/paxg@2x.png" },
 
       // Indian Stocks
       { symbol: "RELIANCE", exchange: "NSE", name: "Reliance Industries", assetClass: "INDIAN_STOCK" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },

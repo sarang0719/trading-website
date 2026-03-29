@@ -23,7 +23,7 @@ export default function Watchlists() {
   const [search, setSearch] = useState("");
 
   const items = useMemo(() => {
-    const list = (q.data as any[]) ?? [];
+    const list = Array.isArray(q.data) ? q.data : [];
     const s = search.trim().toLowerCase();
     if (!s) return list;
     return list.filter((w) => String(w.name).toLowerCase().includes(s));

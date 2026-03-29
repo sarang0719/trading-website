@@ -11,6 +11,28 @@ import { CandlestickChart, Filter, Plus, Search, TriangleAlert } from "lucide-re
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import OrderTicketDialog from "@/components/OrderTicketDialog";
 
+function MiniSparkline({ data, isUp }: { data: string[], isUp: boolean }) {
+  if (!data || data.length < 2) return null;
+  const nums = data.map(Number);
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const range = max - min || 1;
+  const w = 80, h = 28;
+  const pts = nums.map((v, i) => `${(i / (nums.length - 1)) * w},${h - ((v - min) / range) * h}`);
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} fill="none">
+      <polyline
+        points={pts.join(' ')}
+        stroke={isUp ? '#089981' : '#f23645'}
+        strokeWidth="1.5"
+        fill="none"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export default function Markets() {
   const [q, setQ] = useState("");
   const [assetClass, setAssetClass] = useState<string>("ALL");
@@ -134,44 +156,54 @@ export default function Markets() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">
-                        {i.symbol} <span className="text-muted-foreground font-normal">• {i.exchange}</span>
+                      <div className="text-sm font-semibold truncate flex items-center gap-2">
+                        {i.symbol} 
+                        <span className="text-[10px] bg-secondary/50 px-1.5 py-0.5 rounded text-muted-foreground font-normal tracking-wide uppercase">{i.exchange}</span>
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{i.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground line-clamp-1">{i.name}</div>
                     </div>
-                    <span className="rounded-full border border-border/60 bg-background/50 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-                      {i.assetClass}
-                    </span>
+                    
+                    <div className="text-right shrink-0">
+                       <div className="font-bold text-sm text-foreground">
+                         {i.price?.price ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: Number(i.price.price) < 1 ? 4 : 2 }).format(Number(i.price.price)) : "—"}
+                       </div>
+                       <div className={`text-[10px] font-bold mt-0.5 ${Number(i.price?.changePct) >= 0 ? "text-accent" : "text-destructive"}`}>
+                         {Number(i.price?.changePct) >= 0 ? "+" : ""}{Number(i.price?.changePct || 0).toFixed(2)}%
+                       </div>
+                    </div>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="text-xs text-muted-foreground">
-                      {i.country} • {i.currency}
+                  <div className="mt-3 flex items-end justify-between gap-2">
+                    <div className="flex items-end">
+                      <MiniSparkline data={i.price?.sparkline ?? []} isUp={Number(i.price?.changePct) >= 0} />
                     </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="text-[10px] text-muted-foreground">{i.country} • {i.currency}</div>
 
-                    <Button
-                      type="button"
-                      size="sm"
-                      data-testid={`market-trade-${i.id}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTicketInstrument(i);
-                        setTicketOpen(true);
-                      }}
-                      className="
-                        rounded-2xl
-                        bg-gradient-to-r from-primary to-primary/85
-                        text-primary-foreground
-                        shadow-md shadow-primary/20
-                        hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5
-                        active:translate-y-0
-                        transition-all duration-300 ease-out
-                      "
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Trade
-                    </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        data-testid={`market-trade-${i.id}`}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setTicketInstrument(i);
+                          setTicketOpen(true);
+                        }}
+                        className="
+                          rounded-2xl
+                          bg-gradient-to-r from-primary to-primary/85
+                          text-primary-foreground
+                          shadow-md shadow-primary/20
+                          hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5
+                          active:translate-y-0
+                          transition-all duration-300 ease-out
+                        "
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Trade
+                      </Button>
+                    </div>
                   </div>
                 </Link>
               ))}

@@ -11,6 +11,7 @@ import Watchlists from "@/pages/Watchlists";
 import WatchlistDetail from "@/pages/WatchlistDetail";
 import Markets from "@/pages/Markets";
 import Orders from "@/pages/Orders";
+import PortfolioPage from "@/pages/Portfolio";
 import NewOrder from "@/pages/NewOrder";
 import Learn from "@/pages/Learn";
 import LearnDetail from "@/pages/LearnDetail";
@@ -18,6 +19,7 @@ import AIInsights from "@/pages/AIInsights";
 import MarketDetail from "@/pages/MarketDetail";
 import Settings from "@/pages/Settings";
 import NotFoundApp from "@/pages/NotFoundApp";
+import Strategy from "@/pages/Strategy";
 
 function Router() {
   return (
@@ -27,6 +29,7 @@ function Router() {
 
       {/* App */}
       <Route path="/app" component={AppIndex} />
+      <Route path="/app/portfolio" component={PortfolioPage} />
       <Route path="/app/watchlists" component={Watchlists} />
       <Route path="/app/watchlists/:id" component={WatchlistDetail} />
       <Route path="/app/markets" component={Markets} />
@@ -37,6 +40,7 @@ function Router() {
       <Route path="/app/learn/:id" component={LearnDetail} />
       <Route path="/app/insights" component={AIInsights} />
       <Route path="/app/settings" component={Settings} />
+      <Route path="/app/strategy" component={Strategy} />
 
       {/* Nice 404 for app routes */}
       <Route path="/app/:rest*" component={NotFoundApp as any} />

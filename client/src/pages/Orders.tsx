@@ -30,7 +30,7 @@ export default function Orders() {
   const [cancelId, setCancelId] = useState<number | null>(null);
 
   const list = useMemo(() => {
-    const items = (q.data as any[]) ?? [];
+    const items = Array.isArray(q.data) ? q.data : [];
     const s = search.trim().toLowerCase();
     if (!s) return items;
     return items.filter((o) => {

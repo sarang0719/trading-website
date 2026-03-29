@@ -11,55 +11,55 @@
   --font-serif: "Fraunces", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Default to a deep dark theme as per screenshots */
-  --background: 222 47% 4%;
+  /* TradingView Exact Dark Theme Palette */
+  --background: 223 28% 10%; /* #131722 */
   --foreground: 210 40% 98%;
 
-  --card: 222 47% 6%;
+  --card: 224 20% 15%; /* #1E222D */
   --card-foreground: 210 40% 98%;
-  --card-border: 222 20% 12%;
+  --card-border: 224 15% 19%; /* #2A2E39 */
 
-  --popover: 222 47% 5%;
+  --popover: 224 20% 15%;
   --popover-foreground: 210 40% 98%;
-  --popover-border: 222 20% 12%;
+  --popover-border: 224 15% 19%;
 
-  --border: 222 20% 12%;
-  --input: 222 20% 15%;
-  --ring: 185 95% 55%;
+  --border: 224 15% 19%;
+  --input: 224 15% 19%;
+  --ring: 224 100% 58%; /* #2962FF */
 
-  /* Brand: Electric Blue/Cyan accents from reference */
-  --primary: 185 95% 55%;
-  --primary-foreground: 222 47% 4%;
+  /* Brand: TradingView Blue */
+  --primary: 224 100% 58%;
+  --primary-foreground: 210 40% 98%;
 
-  --secondary: 222 20% 10%;
+  --secondary: 224 20% 15%;
   --secondary-foreground: 210 40% 98%;
 
-  --muted: 222 20% 10%;
+  --muted: 224 20% 15%;
   --muted-foreground: 215 16% 65%;
 
-  /* Ups and Downs: Vivid Green and Red from reference */
-  --accent: 155 85% 50%;
-  --accent-foreground: 222 47% 4%;
+  /* Ups and Downs: TV Green and Red */
+  --accent: 170 90% 32%; /* #089981 */
+  --accent-foreground: 210 40% 98%;
 
-  --destructive: 0 85% 60%;
+  --destructive: 355 89% 58%; /* #F23645 */
   --destructive-foreground: 210 40% 98%;
 
-  --sidebar: 222 47% 3%;
+  --sidebar: 224 20% 15%;
   --sidebar-foreground: 215 16% 85%;
-  --sidebar-border: 222 20% 8%;
-  --sidebar-primary: 185 95% 55%;
-  --sidebar-primary-foreground: 222 47% 4%;
-  --sidebar-accent: 222 20% 10%;
+  --sidebar-border: 224 15% 19%;
+  --sidebar-primary: 224 100% 58%;
+  --sidebar-primary-foreground: 210 40% 98%;
+  --sidebar-accent: 223 28% 10%;
   --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 185 95% 55%;
+  --sidebar-ring: 224 100% 58%;
 
-  --chart-1: 185 95% 55%;
-  --chart-2: 155 85% 50%;
-  --chart-3: 0 85% 60%;
-  --chart-4: 262 83% 65%;
-  --chart-5: 198 90% 55%;
+  --chart-1: 224 100% 58%;
+  --chart-2: 170 90% 32%;
+  --chart-3: 355 89% 58%;
+  --chart-4: 31 90% 55%;
+  --chart-5: 262 83% 65%;
 
-  --radius: 1rem;
+  --radius: 0.5rem;
 }
 
 @layer base {

@@ -35,6 +35,7 @@ export const users = pgTable(
   {
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     email: varchar("email").unique(),
+    password: text("password"),
     firstName: varchar("first_name"),
     lastName: varchar("last_name"),
     profileImageUrl: varchar("profile_image_url"),
@@ -212,6 +213,11 @@ export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit
 export const insertPortfolioSchema = createInsertSchema(portfolios).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, status: true, filledPrice: true });
 
+export type CreateWatchlistRequest = z.infer<typeof insertWatchlistSchema>;
+export type CreateWatchlistItemRequest = z.infer<typeof insertWatchlistItemSchema>;
+export type CreatePortfolioRequest = z.infer<typeof insertPortfolioSchema>;
+export type CreateOrderRequest = z.infer<typeof insertOrderSchema>;
+
 export type Instrument = typeof instruments.$inferSelect;
 export type LatestPrice = typeof latestPrices.$inferSelect;
 export type Watchlist = typeof watchlists.$inferSelect;
@@ -222,7 +228,7 @@ export type Order = typeof orders.$inferSelect;
 export type NewsArticle = typeof newsArticles.$inferSelect;
 export type LearnArticle = typeof learnArticles.$inferSelect;
 
-export type InstrumentsListResponse = Instrument[];
+export type InstrumentsListResponse = (Instrument & { price?: LatestPrice })[];
 export type InstrumentDetailResponse = {
   instrument: Instrument;
   price?: LatestPrice;

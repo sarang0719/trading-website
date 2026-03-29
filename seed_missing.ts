@@ -9,9 +9,15 @@ async function main() {
         { symbol: "QQQ", exchange: "NASDAQ", name: "Invesco QQQ Trust", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
         { symbol: "VTI", exchange: "NYSE", name: "Vanguard Total Stock Market ETF", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
 
-        // Mutual Funds (US specific mutual funds available on Alpha Vantage)
-        { symbol: "VFIAX", exchange: "MUTUAL", name: "Vanguard 500 Index Fund Admiral Shares", assetClass: "MUTUAL_FUND" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-        { symbol: "FXAIX", exchange: "MUTUAL", name: "Fidelity 500 Index Fund", assetClass: "MUTUAL_FUND" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+        // Commodities (Crypto-backed for live data)
+        { symbol: "PAXGUSDT", exchange: "BINANCE", name: "Gold (PAXG)", assetClass: "CRYPTO" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/paxg@2x.png" },
+
+        // Tech Stocks
+        { symbol: "TSLA", exchange: "NASDAQ", name: "Tesla Inc", assetClass: "STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+        { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc", assetClass: "STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+        { symbol: "NVDA", exchange: "NASDAQ", name: "NVIDIA Corp", assetClass: "STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+        { symbol: "AMZN", exchange: "NASDAQ", name: "Amazon", assetClass: "STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+        { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corporation", assetClass: "STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
 
         // FOREX
         { symbol: "EURUSD", exchange: "FOREX", name: "Euro / US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },

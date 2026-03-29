@@ -3,6 +3,7 @@ import Seo from "@/components/Seo";
 import { usePortfolioSummary } from "@/hooks/use-portfolio";
 import { useMarketNews } from "@/hooks/use-market";
 import { useWatchlists } from "@/hooks/use-watchlists";
+import { useInstruments } from "@/hooks/use-instruments";
 import { useToast } from "@/hooks/use-toast";
 import { isUnauthorizedError, redirectToLogin } from "@/lib/auth-utils";
 import StatPill from "@/components/StatPill";
@@ -35,10 +36,12 @@ export default function Dashboard() {
   const portfolio = usePortfolioSummary();
   const news = useMarketNews();
   const watchlists = useWatchlists();
+  const markets = useInstruments();
 
   const p = portfolio.data as any;
   const totals = p?.totals;
   const holdings = p?.holdings ?? [];
+  const overviewItems = holdings.length > 0 ? holdings : (markets.data ?? []).slice(0, 4).map((inst: any) => ({ instrument: inst, price: inst.price }));
 
   function handle401(err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
@@ -97,49 +100,51 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-4">
-              {holdings.map((h: any) => {
+              {overviewItems.map((h: any) => {
                 const sparkData = (h.price?.sparkline ?? []).map((v: string, i: number) => ({ value: Number(v), time: i }));
                 const isUp = (h.price?.changePct ?? 0) >= 0;
 
                 return (
-                  <Link key={h.instrument.id} href={`/app/markets/${h.instrument.id}`} className="group flex items-center justify-between p-4 rounded-2xl hover:bg-secondary/30 transition-colors border border-transparent hover:border-border/50 cursor-pointer">
-                    <div className="flex items-center gap-4 min-w-[180px]">
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={h.instrument.imageUrl} />
-                        <AvatarFallback>{h.instrument.symbol[0]}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-bold flex items-center gap-2">
-                          {h.instrument.symbol} <span className="text-[10px] text-muted-foreground uppercase tracking-widest px-1.5 py-0.5 bg-secondary rounded">Binance</span>
+                  <Link key={h.instrument.id} href={`/app/markets/${h.instrument.id}`}>
+                    <div className="group flex items-center justify-between p-4 rounded-2xl hover:bg-secondary/30 transition-colors border border-transparent hover:border-border/50 cursor-pointer">
+                      <div className="flex items-center gap-4 min-w-[180px]">
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={h.instrument.imageUrl} />
+                          <AvatarFallback className="bg-primary/20">{h.instrument.symbol[0]}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-bold flex items-center gap-2 text-foreground">
+                            {h.instrument.symbol} <span className="text-[10px] text-muted-foreground uppercase tracking-widest px-1.5 py-0.5 bg-secondary rounded">{h.instrument.exchange}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">{h.instrument.name}</div>
                         </div>
-                        <div className="text-xs text-muted-foreground">{h.instrument.name}</div>
                       </div>
-                    </div>
 
-                    <div className="hidden md:block flex-1 max-w-[120px] h-10 mx-8">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={sparkData}>
-                          <defs>
-                            <linearGradient id={`grad-${h.instrument.id}`} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <Area 
-                            type="monotone" 
-                            dataKey="value" 
-                            stroke={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} 
-                            fill={`url(#grad-${h.instrument.id})`}
-                            strokeWidth={2}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
+                      <div className="hidden md:block flex-1 max-w-[120px] h-10 mx-8">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={sparkData}>
+                            <defs>
+                              <linearGradient id={`grad-${h.instrument.id}`} x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0.3}/>
+                                <stop offset="95%" stopColor={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <Area 
+                              type="monotone" 
+                              dataKey="value" 
+                              stroke={isUp ? "hsl(var(--accent))" : "hsl(var(--destructive))"} 
+                              fill={`url(#grad-${h.instrument.id})`}
+                              strokeWidth={2}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
 
-                    <div className="text-right">
-                      <div className="font-bold">{fmtUsd(Number(h.price?.price))}</div>
-                      <div className={cn("text-xs font-bold", isUp ? "text-accent" : "text-destructive")}>
-                        {isUp ? "+" : ""}{fmtPct(Number(h.price?.changePct))}
+                      <div className="text-right">
+                        <div className="font-bold text-foreground">{fmtUsd(Number(h.price?.price))}</div>
+                        <div className={cn("text-xs font-bold", isUp ? "text-accent" : "text-destructive")}>
+                          {isUp ? "+" : ""}{fmtPct(Number(h.price?.changePct))}
+                        </div>
                       </div>
                     </div>
                   </Link>
@@ -158,7 +163,7 @@ export default function Dashboard() {
             </div>
             
             <div className="space-y-3">
-              {(watchlists.data as any[] | undefined)?.slice(0, 3)?.map((w: any) => (
+              {(Array.isArray(watchlists.data) ? watchlists.data : [])?.slice(0, 3)?.map((w: any) => (
                 <Link
                   key={w.id}
                   href={`/app/watchlists/${w.id}`}
@@ -189,7 +194,7 @@ export default function Dashboard() {
           <section className="glass rounded-[2rem] p-6">
              <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">Market Insight</h3>
              <div className="space-y-4">
-                {(news.data ?? []).slice(0, 3).map((a: any) => (
+                {(Array.isArray(news.data) ? news.data : []).slice(0, 3).map((a: any) => (
                   <div key={a.id} className="group cursor-pointer">
                     <div className="text-[13px] font-bold line-clamp-2 group-hover:text-primary transition-colors">{a.title}</div>
                     <div className="text-[10px] text-muted-foreground mt-1 flex items-center justify-between">

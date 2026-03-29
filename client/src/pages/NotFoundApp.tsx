@@ -40,7 +40,7 @@ export default function NotFoundApp() {
               type="button"
               variant="secondary"
               data-testid="notfound-login"
-              onClick={() => (window.location.href = "/api/login")}
+              onClick={() => (window.location.href = "/")}
               className="rounded-2xl"
             >
               Login

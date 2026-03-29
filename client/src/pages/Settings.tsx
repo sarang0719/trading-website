@@ -23,7 +23,7 @@ export default function Settings() {
                 Account
               </div>
               <div className="mt-1 text-sm text-muted-foreground">
-                Managed by Replit Auth (OIDC).
+                Managed by Local Auth.
               </div>
             </div>
 

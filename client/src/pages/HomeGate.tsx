@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import Landing from "@/pages/Landing";
+import AuthPage from "@/pages/AuthPage";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function HomeGate() {
@@ -34,7 +34,7 @@ export default function HomeGate() {
     );
   }
 
-  if (!isAuthenticated) return <Landing />;
+  if (!isAuthenticated) return <AuthPage />;
 
   return null;
 }

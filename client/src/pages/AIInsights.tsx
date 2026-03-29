@@ -12,6 +12,9 @@ import EmptyState from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import { MessageSquare, Plus, Send, Sparkles, Trash2, TriangleAlert } from "lucide-react";
 import { useLocation } from "wouter";
+import StrategyPanel from "@/components/StrategyPanel";
+import SmartAutoPilot from "@/components/SmartAutoPilot";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 function niceTime(s: string) {
   const d = new Date(s);
@@ -22,6 +25,12 @@ function niceTime(s: string) {
 export default function AIInsights() {
   const { toast } = useToast();
   const [, setLoc] = useLocation();
+
+  // Strategy scanner state
+  const [scanInput,  setScanInput]    = useState("BTCUSDT");
+  const [scanTf,     setScanTf]       = useState("1d");
+  const [activeSymbol, setActiveSymbol] = useState("BTCUSDT");
+  const [activeTf,     setActiveTf]     = useState("1d");
 
   const conversations = useConversations();
   const create = useCreateConversation();
@@ -116,7 +125,45 @@ export default function AIInsights() {
     <AppShell title="AI Insights" subtitle="Aurum Lens: streaming answers that stay useful, not verbose.">
       <Seo title="AI Insights • Aurum Paper" description="Streaming AI chat for market and portfolio insights." />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 lg:gap-7">
+      <div className="space-y-6">
+        <SmartAutoPilot />
+
+        {/* ─── QuantEdge Pro Scanner ─── */}
+        <div className="glass rounded-3xl border border-border/60 p-5 shadow-luxe">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-base font-bold">⚡ QuantEdge Pro v9.0 Scanner</span>
+            <span className="text-[10px] uppercase tracking-widest bg-primary/20 text-primary px-2 py-0.5 rounded-full">AI Strategy</span>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3 mb-5">
+            <Input
+              value={scanInput}
+              onChange={e => setScanInput(e.target.value.toUpperCase())}
+              placeholder="Symbol e.g. BTCUSDT"
+              className="rounded-2xl bg-background/50 font-mono"
+              onKeyDown={e => { if (e.key === "Enter") { setActiveSymbol(scanInput); setActiveTf(scanTf); } }}
+            />
+            <Select value={scanTf} onValueChange={setScanTf}>
+              <SelectTrigger className="rounded-2xl bg-background/50 w-36 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["1m","5m","15m","1h","4h","1d","1w"].map(tf => (
+                  <SelectItem key={tf} value={tf}>{tf}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={() => { setActiveSymbol(scanInput); setActiveTf(scanTf); }}
+              className="rounded-2xl bg-gradient-to-r from-primary to-primary/85 text-primary-foreground shadow-md"
+            >
+              Scan
+            </Button>
+          </div>
+          <StrategyPanel symbol={activeSymbol} interval={activeTf} />
+        </div>
+
+        {/* ─── Threads grid ─── */}
+        <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 lg:gap-7">
         <aside className="glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-luxe">
           <div className="flex items-center justify-between gap-2">
             <div className="text-sm font-semibold">Threads</div>
@@ -356,7 +403,8 @@ export default function AIInsights() {
             </div>
           </div>
         </section>
-      </div>
+        </div>{/* end threads grid */}
+      </div>{/* end space-y-6 */}
 
       <ConfirmDialog
         open={confirmOpen}

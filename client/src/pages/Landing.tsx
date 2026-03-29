@@ -34,7 +34,7 @@ export default function Landing() {
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <a
-                href="/api/login"
+                href="/"
                 data-testid="landing-login"
                 className="
                   inline-flex items-center justify-center
@@ -75,7 +75,7 @@ export default function Landing() {
 
               <div className="mt-7 flex flex-col sm:flex-row gap-3">
                 <a
-                  href="/api/login"
+                  href="/"
                   data-testid="landing-cta"
                   className="
                     inline-flex items-center justify-center
@@ -156,13 +156,13 @@ export default function Landing() {
                       <div
                         key={s.k}
                         className={cn(
-                          "rounded-2xl border px-4 py-3 shadow-sm bg-background/40 backdrop-blur",
-                          "transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md",
-                          s.tone === "good"
-                            ? "border-accent/20"
-                            : s.tone === "primary"
-                              ? "border-primary/20"
-                              : "border-border/60",
+                           "rounded-2xl border px-4 py-3 shadow-sm bg-background/40 backdrop-blur",
+                           "transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-md",
+                           s.tone === "good"
+                             ? "border-accent/20"
+                             : s.tone === "primary"
+                               ? "border-primary/20"
+                               : "border-border/60",
                         )}
                       >
                         <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{s.k}</div>
@@ -194,7 +194,7 @@ export default function Landing() {
                         Open AI Insights
                       </Link>
                       <a
-                        href="/api/login"
+                        href="/"
                         data-testid="landing-login-2"
                         className="
                           inline-flex items-center justify-center
@@ -269,20 +269,20 @@ export default function Landing() {
 
             <div className="mt-7 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-xs text-muted-foreground">
-                No credit card required • Auth by Replit • Cookies-based sessions
+                No credit card required • Local Auth • Cookies-based sessions
               </div>
               <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="secondary"
                   data-testid="landing-github"
-                  onClick={() => window.open("https://replit.com", "_blank")}
+                  onClick={() => window.open("https://github.com", "_blank")}
                   className="rounded-2xl"
                 >
-                  Powered by Replit
+                  View on GitHub
                 </Button>
                 <a
-                  href="/api/login"
+                  href="/"
                   data-testid="landing-bottom-login"
                   className="
                     inline-flex items-center justify-center
