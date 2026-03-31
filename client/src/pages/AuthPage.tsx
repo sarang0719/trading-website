@@ -10,26 +10,18 @@ import { useToast } from "@/hooks/use-toast";
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
-  const { login, register, isLoading } = useAuth();
+  const { login, isLoading } = useAuth();
   const { toast } = useToast();
-  const [isLogin, setIsLogin] = useState(true);
 
   // Form states
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (isLogin) {
-        const res = await login({ email, password });
-        if (res.ok) setLocation("/app");
-      } else {
-        const res = await register({ email, password, firstName, lastName });
-        if (res.ok) setLocation("/app");
-      }
+      const res = await login({ email, password });
+      if (res.ok) setLocation("/app");
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -41,7 +33,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-mesh grain flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <Seo title={isLogin ? "Login - Aurum Paper" : "Register - Aurum Paper"} />
+      <Seo title="Login - Aurum Paper" />
       
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center z-10">
          <div className="flex justify-center mb-6">
@@ -50,49 +42,16 @@ export default function AuthPage() {
             </div>
          </div>
         <h2 className="mt-2 text-3xl font-extrabold tracking-tight">
-          {isLogin ? "Sign in to your account" : "Create a new account"}
+          Sign in to your account
         </h2>
         <p className="mt-3 text-sm text-muted-foreground">
-          {isLogin ? "Or " : "Already have an account? "}
-          <button 
-            onClick={() => setIsLogin(!isLogin)} 
-            className="font-medium text-primary hover:text-primary/80 transition-colors"
-          >
-            {isLogin ? "register for a new account" : "sign in instead"}
-          </button>
+          Welcome back to the trading platform
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md z-10 relative">
         <div className="glass shadow-luxe rounded-3xl sm:px-10 px-6 py-8 border border-border/60 backdrop-blur-2xl">
           <form className="space-y-5" onSubmit={handleSubmit}>
-            {!isLogin && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-foreground/80 mb-1.5 uppercase tracking-wide">First Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full bg-input/40 border border-border/60 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none transition-all placeholder:text-muted-foreground/50"
-                    placeholder="John"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-foreground/80 mb-1.5 uppercase tracking-wide">Last Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full bg-input/40 border border-border/60 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-primary/50 focus:border-primary/50 outline-none transition-all placeholder:text-muted-foreground/50"
-                    placeholder="Doe"
-                  />
-                </div>
-              </div>
-            )}
-            
             <div>
               <label className="block text-xs font-semibold text-foreground/80 mb-1.5 uppercase tracking-wide">Email</label>
               <input
@@ -123,7 +82,7 @@ export default function AuthPage() {
                 className="w-full rounded-xl py-6 text-sm font-semibold bg-gradient-to-r from-primary to-primary/85 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all active:scale-[0.98]"
                 disabled={isLoading}
               >
-                {isLoading ? "Please wait..." : (isLogin ? "Sign In" : "Create Account")}
+                {isLoading ? "Please wait..." : "Sign In"}
               </Button>
             </div>
           </form>

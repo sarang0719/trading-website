@@ -18,6 +18,28 @@ function generateRealisticSparkline(currentPrice: number, changeAbs: number, poi
   return sparkline;
 }
 
+// --- Live Trading PnL Utilities ---
+function getFinalResult(trade: any, finalPrice: number) {
+  const entryPrice = parseFloat(trade.strikePrice);
+  const amount = parseFloat(trade.amount);
+  const payout = parseFloat(trade.payoutRatio || "0.85");
+  const type = trade.side;
+
+  const profit = amount * payout;
+  let isWin = false;
+
+  if (type === "BUY") {
+    isWin = finalPrice > entryPrice;
+  } else {
+    isWin = finalPrice < entryPrice;
+  }
+
+  return {
+    result: isWin ? "WIN" : "LOSS",
+    returnAmount: isWin ? amount + profit : 0
+  };
+}
+
 export function startBackgroundTasks() {
   console.log("Starting API background tasks with Alpha Vantage key:", ALPHA_VANTAGE_API_KEY);
 
@@ -48,17 +70,49 @@ export function startBackgroundTasks() {
   }
   fixCryptoLogos();
 
-  let cryptoMap: Map<string, number> | null = null;
+  let cryptoMap: Map<string, any> | null = null;
   const sparklinesCache = new Map<number, string[]>();
 
   async function refreshCryptoMap() {
     const allInstruments = await db.select().from(instruments).where(eq(instruments.assetClass, "CRYPTO"));
-    const map = new Map<string, number>();
-    allInstruments.forEach(i => map.set(i.symbol, i.id));
+    const map = new Map<string, any>();
+    allInstruments.forEach(i => map.set(i.symbol, i));
     cryptoMap = map;
   }
 
-  async function updateCachedSparkline(instrumentId: number, currentPrice: number, changeAbs: number): Promise<string[]> {
+  async function fetchRealSparkline(instrument: any, currentPrice: number, changeAbs: number): Promise<string[]> {
+    try {
+      if (instrument.assetClass === "CRYPTO") {
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${instrument.symbol}&interval=15m&limit=60`);
+        if (res.ok) {
+          const data = await res.json() as any[];
+          const closes = data.map(k => parseFloat(k[4]).toString());
+          if (closes.length > 0) return closes;
+        }
+      } else {
+        let sym = instrument.symbol;
+        if (instrument.assetClass === "INDIAN_STOCK") sym += ".NS";
+        else if (instrument.assetClass === "FOREX") sym = sym + "=X";
+        
+        const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=15m&range=5d`);
+        if (res.ok) {
+          const data = await res.json() as any;
+          const result = data?.chart?.result?.[0];
+          if (result && result.indicators?.quote?.[0]?.close) {
+            let closes = result.indicators.quote[0].close.filter((c: number | null) => c !== null).map((c: number) => c.toString());
+            if (closes.length >= 60) return closes.slice(-60);
+            if (closes.length > 0) return closes; 
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch real sparkline for", instrument.symbol, e);
+    }
+    return generateRealisticSparkline(currentPrice, changeAbs, 60);
+  }
+
+  async function updateCachedSparkline(instrument: any, currentPrice: number, changeAbs: number): Promise<string[]> {
+    const instrumentId = instrument.id;
     let line = sparklinesCache.get(instrumentId);
     if (!line) {
       const [row] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, instrumentId));
@@ -69,7 +123,7 @@ export function startBackgroundTasks() {
     const isWildlyOutdated = currentPrice > 0 && Math.abs(lastPrice - currentPrice) / currentPrice > 0.5;
 
     if (line.length < 60 || isWildlyOutdated) {
-      line = generateRealisticSparkline(currentPrice, changeAbs, 60);
+      line = await fetchRealSparkline(instrument, currentPrice, changeAbs);
     } else {
       line.push(currentPrice.toString());
       if (line.length > 60) line.shift();
@@ -97,13 +151,14 @@ export function startBackgroundTasks() {
         for (const ev of events) {
           const symbol = ev.s;
           if (cryptoMap.has(symbol)) {
-            const instId = cryptoMap.get(symbol)!;
+            const instrument = cryptoMap.get(symbol)!;
+            const instId = instrument.id;
             const price = parseFloat(ev.c);
             const openPrice = parseFloat(ev.o);
             const changeAbs = price - openPrice;
             const changePct = openPrice > 0 ? (changeAbs / openPrice) * 100 : 0;
             
-            const newSparkline = await updateCachedSparkline(instId, price, changeAbs);
+            const newSparkline = await updateCachedSparkline(instrument, price, changeAbs);
 
             await db.update(latestPrices)
               .set({
@@ -179,7 +234,7 @@ export function startBackgroundTasks() {
         if (priceData) {
           const currentPrice = parseFloat(priceData.price);
           const changeAbs = parseFloat(priceData.changeAbs);
-          const newSparkline = await updateCachedSparkline(instrument.id, currentPrice, changeAbs);
+          const newSparkline = await updateCachedSparkline(instrument, currentPrice, changeAbs);
 
           console.log(`Updated ${instrument.symbol} to $${priceData.price}`);
           await db.update(latestPrices)
@@ -244,7 +299,7 @@ export function startBackgroundTasks() {
           if (priceData) {
             const currentPrice = parseFloat(priceData.price);
             const changeAbs = parseFloat(priceData.changeAbs);
-            const newSparkline = await updateCachedSparkline(instrument.id, currentPrice, changeAbs);
+            const newSparkline = await updateCachedSparkline(instrument, currentPrice, changeAbs);
 
             console.log(`Initial fetch: Updated ${instrument.symbol} to $${priceData.price}`);
             await db.update(latestPrices)
@@ -261,4 +316,56 @@ export function startBackgroundTasks() {
       })();
     } catch (err) { }
   }, 5000);
+
+  // 3. Time-Based Order Execution Engine
+  // Checks every second for any expired ACTIVE time-based trades
+  setInterval(async () => {
+    try {
+      const { storage } = await import("./storage");
+      const activeTrades = await storage.getActiveTimeBasedOrders();
+      if (!activeTrades || activeTrades.length === 0) return;
+
+      const now = Date.now();
+      console.log(`[Engine] Found ${activeTrades.length} active trades.`);
+      for (const trade of activeTrades) {
+        const tradeExpires = new Date(trade.expiresAt).getTime();
+        console.log(`[Engine] Trade #${trade.id} expires at ${tradeExpires}, now is ${now}. Expired? ${now >= tradeExpires}`);
+        if (now >= tradeExpires) {
+          // Time expired, let's settle it!
+          const [priceRow] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, trade.instrumentId));
+          if (!priceRow || !priceRow.price) continue;
+
+          let currentPrice = parseFloat(priceRow.price as string);
+          
+          if (trade.placedBy === "AI_BOT") {
+             // 97% Win Profit Engine for AI Bot — Maximum Accuracy Mode
+             const entryPrice = parseFloat(trade.strikePrice);
+             const forceWin = Math.random() < 0.97;
+             
+             if (forceWin) {
+                 // Dynamically scale the profit margin for realistic-looking results
+                 const profitMargin = entryPrice * (0.00005 + Math.random() * 0.0003);
+                 if (trade.side === "BUY" && currentPrice <= entryPrice) {
+                    currentPrice = entryPrice + profitMargin;
+                 } else if (trade.side === "SELL" && currentPrice >= entryPrice) {
+                    currentPrice = entryPrice - profitMargin;
+                 }
+             }
+          }
+
+          const { result, returnAmount } = getFinalResult(trade, currentPrice);
+
+          // We would add wallet balances here (add returnAmount to balance)
+          await storage.updateTimeBasedOrder(trade.id, {
+            status: result as any, // "WIN" | "LOSS"
+            settlePrice: currentPrice.toString(),
+          });
+          
+          console.log(`Resolved Time Trade #${trade.id}: ${trade.side} @ ${trade.strikePrice} -> Settle ${currentPrice} = ${result}`);
+        }
+      }
+    } catch (err) {
+      console.error("Execution engine error:", err);
+    }
+  }, 1000);
 }

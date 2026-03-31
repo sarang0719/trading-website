@@ -27,10 +27,10 @@ export default function AIInsights() {
   const [, setLoc] = useLocation();
 
   // Strategy scanner state
-  const [scanInput,  setScanInput]    = useState("BTCUSDT");
-  const [scanTf,     setScanTf]       = useState("1d");
-  const [activeSymbol, setActiveSymbol] = useState("BTCUSDT");
-  const [activeTf,     setActiveTf]     = useState("1d");
+  const [scanInput,  setScanInput]    = useState("XAUUSD");
+  const [scanTf,     setScanTf]       = useState("15m");
+  const [activeSymbol, setActiveSymbol] = useState("XAUUSD");
+  const [activeTf,     setActiveTf]     = useState("15m");
 
   const conversations = useConversations();
   const create = useCreateConversation();
@@ -138,7 +138,7 @@ export default function AIInsights() {
             <Input
               value={scanInput}
               onChange={e => setScanInput(e.target.value.toUpperCase())}
-              placeholder="Symbol e.g. BTCUSDT"
+              placeholder="Symbol e.g. XAUUSD"
               className="rounded-2xl bg-background/50 font-mono"
               onKeyDown={e => { if (e.key === "Enter") { setActiveSymbol(scanInput); setActiveTf(scanTf); } }}
             />

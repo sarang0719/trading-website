@@ -39,6 +39,7 @@ export const users = pgTable(
     firstName: varchar("first_name"),
     lastName: varchar("last_name"),
     profileImageUrl: varchar("profile_image_url"),
+    autoTradeEnabled: boolean("auto_trade_enabled"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -64,6 +65,7 @@ export const assetClassEnum = pgEnum("asset_class", [
 export const orderSideEnum = pgEnum("order_side", ["BUY", "SELL"]);
 export const orderTypeEnum = pgEnum("order_type", ["MARKET", "LIMIT", "STOP_LOSS"]);
 export const orderStatusEnum = pgEnum("order_status", ["PENDING", "FILLED", "CANCELLED", "REJECTED"]);
+export const timeTradeStatusEnum = pgEnum("time_trade_status", ["ACTIVE", "WIN", "LOSS", "TIE"]);
 
 export const instruments = pgTable(
   "instruments",
@@ -179,6 +181,30 @@ export const orders = pgTable(
   (t) => [index("orders_user_id_idx").on(t.userId)],
 );
 
+export const timeBasedOrders = pgTable(
+  "time_based_orders",
+  {
+    id: serial("id").primaryKey(),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    placedBy: varchar("placed_by").notNull().default("USER"),
+    instrumentId: integer("instrument_id")
+      .notNull()
+      .references(() => instruments.id, { onDelete: "cascade" }),
+    side: orderSideEnum("side").notNull(), // BUY (Up), SELL (Down)
+    amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+    payoutRatio: numeric("payout_ratio", { precision: 5, scale: 2 }).notNull().default("0.85"),
+    strikePrice: numeric("strike_price", { precision: 18, scale: 6 }).notNull(),
+    settlePrice: numeric("settle_price", { precision: 18, scale: 6 }),
+    durationSeconds: integer("duration_seconds").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    status: timeTradeStatusEnum("status").notNull().default("ACTIVE"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => [index("time_orders_user_id_idx").on(t.userId), index("time_orders_expires_at_idx").on(t.expiresAt)],
+);
+
 export const newsArticles = pgTable(
   "news_articles",
   {
@@ -212,11 +238,15 @@ export const insertWatchlistSchema = createInsertSchema(watchlists).omit({ id: t
 export const insertWatchlistItemSchema = createInsertSchema(watchlistItems).omit({ id: true, createdAt: true });
 export const insertPortfolioSchema = createInsertSchema(portfolios).omit({ id: true, createdAt: true });
 export const insertOrderSchema = createInsertSchema(orders).omit({ id: true, createdAt: true, status: true, filledPrice: true });
+export const insertTimeBasedOrderSchema = createInsertSchema(timeBasedOrders).omit({ 
+  id: true, createdAt: true, status: true, settlePrice: true, expiresAt: true, payoutRatio: true, userId: true
+});
 
 export type CreateWatchlistRequest = z.infer<typeof insertWatchlistSchema>;
 export type CreateWatchlistItemRequest = z.infer<typeof insertWatchlistItemSchema>;
 export type CreatePortfolioRequest = z.infer<typeof insertPortfolioSchema>;
 export type CreateOrderRequest = z.infer<typeof insertOrderSchema>;
+export type CreateTimeBasedOrderRequest = z.infer<typeof insertTimeBasedOrderSchema>;
 
 export type Instrument = typeof instruments.$inferSelect;
 export type LatestPrice = typeof latestPrices.$inferSelect;
@@ -225,6 +255,7 @@ export type WatchlistItem = typeof watchlistItems.$inferSelect;
 export type Portfolio = typeof portfolios.$inferSelect;
 export type Holding = typeof holdings.$inferSelect;
 export type Order = typeof orders.$inferSelect;
+export type TimeBasedOrder = typeof timeBasedOrders.$inferSelect;
 export type NewsArticle = typeof newsArticles.$inferSelect;
 export type LearnArticle = typeof learnArticles.$inferSelect;
 

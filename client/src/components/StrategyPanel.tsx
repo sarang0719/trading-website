@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useInstruments } from "@/hooks/use-instruments";
-import { useCreateOrder } from "@/hooks/use-orders";
+import { useTimeTrades } from "@/hooks/use-time-trades";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 
@@ -91,7 +91,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
 
   const { toast } = useToast();
   const instrumentsQuery = useInstruments();
-  const createOrder = useCreateOrder();
+  const { placeTrade } = useTimeTrades();
   const lastOrderTimeRef = useRef<number | null>(null);
 
   // ── Stable refs — never change identity, never trigger re-renders ─────────
@@ -134,8 +134,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
 
     try {
       const symUpper = sym.toUpperCase();
-      const isCrypto = /USDT$|BTC$|ETH$|BNB$/.test(symUpper);
-      if (!isCrypto) throw new Error("Only USDT crypto pairs are supported (e.g. BTCUSDT).");
+      const isCrypto = /USDT$|BTC$|ETH$|BNB$/.test(symUpper) && !["XAUUSD", "XAGUSD", "EURUSD", "GBPUSD"].includes(symUpper);
 
       const cacheKey = `${symUpper}_${ivl}`;
       const cached   = cacheRef.current.get(cacheKey);
@@ -145,33 +144,66 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
         raw = cached.data;
       } else {
         let res: Response;
+        let isTwelveData = !isCrypto;
+        
         try {
-          res = await fetch(
-            `https://api.binance.com/api/v3/klines?symbol=${symUpper}&interval=${ivl}&limit=500`,
-            { signal: ctrl.signal }
-          );
+          if (isCrypto) {
+            res = await fetch(
+              `https://api.binance.com/api/v3/klines?symbol=${symUpper}&interval=${ivl}&limit=500`,
+              { signal: ctrl.signal }
+            );
+          } else {
+            // TwelveData Integration for Gold/Forex
+            let tdInt = ivl;
+            if (ivl.endsWith("m")) tdInt = ivl + "in";
+            else if (ivl === "1d") tdInt = "1day";
+            else if (ivl === "1w") tdInt = "1week";
+            
+            let tdSymbol = symUpper;
+            if (tdSymbol.length >= 6 && !tdSymbol.includes("/")) tdSymbol = tdSymbol.substring(0, 3) + "/" + tdSymbol.substring(3);
+            
+            res = await fetch(
+              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=b630be1ed9604a29a35ad8d11a8af18c&outputsize=500`,
+              { signal: ctrl.signal }
+            );
+          }
         } catch {
-          // Network error or abort — silently stop, keep any existing candles
           if (!destroyRef.current) setLoading(false);
           return;
         }
+        
         if (!res.ok) {
           if (!destroyRef.current) {
-            setError(`Symbol not found or exchange unavailable`);
+            setError(`Network error or exchange unavailable`);
             setLoading(false);
           }
           return;
         }
+        
         const data = await res.json();
-        if (!Array.isArray(data) || data.length === 0) throw new Error("No candle data returned");
-        raw = data.map((d: any) => ({
-          time:   d[0] / 1000,
-          open:   parseFloat(d[1]),
-          high:   parseFloat(d[2]),
-          low:    parseFloat(d[3]),
-          close:  parseFloat(d[4]),
-          volume: parseFloat(d[5]),
-        }));
+        
+        if (isCrypto) {
+          if (!Array.isArray(data) || data.length === 0) throw new Error("No candle data returned");
+          raw = data.map((d: any) => ({
+            time:   d[0] / 1000,
+            open:   parseFloat(d[1]),
+            high:   parseFloat(d[2]),
+            low:    parseFloat(d[3]),
+            close:  parseFloat(d[4]),
+            volume: parseFloat(d[5]),
+          }));
+        } else {
+          if (!data.values || !Array.isArray(data.values) || data.values.length === 0) throw new Error("No premium data returned");
+          raw = data.values.reverse().map((d: any) => ({
+            time:   new Date(d.datetime).getTime() / 1000,
+            open:   parseFloat(d.open),
+            high:   parseFloat(d.high),
+            low:    parseFloat(d.low),
+            close:  parseFloat(d.close),
+            volume: parseFloat(d.volume || "0"),
+          }));
+        }
+        
         cacheRef.current.set(cacheKey, { ts: Date.now(), data: raw });
       }
 
@@ -191,24 +223,23 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
            // We only want to fire once per signal timestamp
            if (lastOrderTimeRef.current !== currentSignal.time) {
               const matchedInst = instrumentsQuery.data?.find((i: any) => i.symbol === symUpper);
-              if (matchedInst && !createOrder.isPending) {
+              if (matchedInst && !placeTrade.isPending) {
                  lastOrderTimeRef.current = currentSignal.time;
                  const side: "BUY" | "SELL" = currentSignal.direction as any;
                  const price = currentSignal.entryPrice;
-                 const quantity = (1000 / price).toFixed(4); // auto-invest $1000 dynamically
                  
-                 createOrder.mutate({
-                   userId: "me",
-                   portfolioId: 1,
+                 placeTrade.mutate({
                    instrumentId: matchedInst.id,
                    side,
-                   type: "MARKET",
-                   quantity
+                   amount: "25.00",
+                   strikePrice: String(price),
+                   durationSeconds: 60,
+                   placedBy: "AI_BOT"
                  }, {
                    onSuccess: () => {
                      toast({
                        title: "🤖 Auto-Invest Executed!",
-                       description: `${side} ${quantity} ${symUpper} @ $${price.toFixed(2)} automatically.`,
+                       description: `${side} 25.00 ${symUpper} Time Trade @ $${price.toFixed(2)}`,
                      });
                    },
                    onError: (err) => {
@@ -242,69 +273,69 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
       wsRef.current = null;
       if (destroyRef.current) return;
       if (typeof navigator === "undefined" || !navigator.onLine) return;
+      if (isCrypto) {
+        try {
+          const ws = new WebSocket(
+            `wss://stream.binance.com:9443/ws/${symUpper.toLowerCase()}@kline_${ivl}`
+          );
+          wsRef.current = ws;
+          ws.onerror = () => { wsRef.current = null; };
+          ws.onclose = () => { ws.onerror = null; };
 
-      try {
-        const ws = new WebSocket(
-          `wss://stream.binance.com:9443/ws/${symUpper.toLowerCase()}@kline_${ivl}`
-        );
-        wsRef.current = ws;
-        ws.onerror = () => { wsRef.current = null; };
-        ws.onclose = () => { ws.onerror = null; };
-
-        ws.onmessage = (ev: MessageEvent) => {
-          if (destroyRef.current) return;
-          try {
-            const msg = JSON.parse(ev.data);
-            if (msg.e !== "kline") return;
-            const k = msg.k;
-            const updated: Candle = {
-              time: k.t / 1000, open: parseFloat(k.o),
-              high: parseFloat(k.h), low: parseFloat(k.l),
-              close: parseFloat(k.c), volume: parseFloat(k.v),
-            };
-            setCandles(prev => {
-              if (destroyRef.current) return prev;
-              const next = [...prev];
-              const last = next[next.length - 1];
-              if (last && last.time === updated.time) next[next.length - 1] = updated;
-              else next.push(updated);
-              const sigs2 = runEngine(next.slice(-300), cfg);
-              if (sigs2.length > 0 && !destroyRef.current) {
-                const liveSignal = sigs2[sigs2.length - 1];
-                setSignal(liveSignal);
-                
-                // --- LIVE AUTO INVEST LOGIC ---
-                if (autoInvest && liveSignal.direction !== "HOLD") {
-                   if (lastOrderTimeRef.current !== liveSignal.time) {
-                      const matchedInst = instrumentsQuery.data?.find((i: any) => i.symbol === symUpper);
-                      if (matchedInst && !createOrder.isPending) {
-                         lastOrderTimeRef.current = liveSignal.time;
-                         const quantity = (1000 / liveSignal.entryPrice).toFixed(4);
-                         
-                         createOrder.mutate({
-                           userId: "me",
-                           portfolioId: 1,
-                           instrumentId: matchedInst.id,
-                           side: liveSignal.direction as any,
-                           type: "MARKET",
-                           quantity
-                         }, {
-                           onSuccess: () => {
-                             toast({
-                               title: "🤖 Live Auto-Invest Executed!",
-                               description: `${liveSignal.direction} ${quantity} ${symUpper} @ $${liveSignal.entryPrice.toFixed(2)} automatically.`,
-                             });
-                           }
-                         });
-                      }
-                   }
+          ws.onmessage = (ev: MessageEvent) => {
+            if (destroyRef.current) return;
+            try {
+              const msg = JSON.parse(ev.data);
+              if (msg.e !== "kline") return;
+              const k = msg.k;
+              const updated: Candle = {
+                time: k.t / 1000, open: parseFloat(k.o),
+                high: parseFloat(k.h), low: parseFloat(k.l),
+                close: parseFloat(k.c), volume: parseFloat(k.v),
+              };
+              setCandles(prev => {
+                if (destroyRef.current) return prev;
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last && last.time === updated.time) next[next.length - 1] = updated;
+                else next.push(updated);
+                const sigs2 = runEngine(next.slice(-300), cfg);
+                if (sigs2.length > 0 && !destroyRef.current) {
+                  const liveSignal = sigs2[sigs2.length - 1];
+                  setSignal(liveSignal);
+                  
+                  // --- LIVE AUTO INVEST LOGIC ---
+                  if (autoInvest && liveSignal.direction !== "HOLD") {
+                     if (lastOrderTimeRef.current !== liveSignal.time) {
+                        const matchedInst = instrumentsQuery.data?.find((i: any) => i.symbol === symUpper);
+                        if (matchedInst && !placeTrade.isPending) {
+                           lastOrderTimeRef.current = liveSignal.time;
+                           
+                           placeTrade.mutate({
+                             instrumentId: matchedInst.id,
+                             side: liveSignal.direction as any,
+                             amount: "5.00",
+                             strikePrice: String(liveSignal.entryPrice),
+                             durationSeconds: 60,
+                             placedBy: "AI_BOT"
+                           }, {
+                             onSuccess: () => {
+                               toast({
+                                 title: "🤖 Live Auto-Invest Executed!",
+                                 description: `${liveSignal.direction} 5.00 ${symUpper} @ $${liveSignal.entryPrice.toFixed(2)} options trade.`,
+                               });
+                             }
+                           });
+                        }
+                     }
+                  }
                 }
-              }
-              return next;
-            });
-          } catch { /* ignore parse errors */ }
-        };
-      } catch { /* WebSocket unavailable — skip silently */ }
+                return next;
+              });
+            } catch { /* ignore parse errors */ }
+          };
+        } catch { /* WebSocket unavailable — skip silently */ }
+      }
     } catch (e: any) {
       if (!destroyRef.current) {
         setError(e.message ?? "Unknown error");

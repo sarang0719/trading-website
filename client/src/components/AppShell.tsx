@@ -120,7 +120,9 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
               <AvatarFallback className="bg-primary/20 text-primary font-bold">{(user?.firstName?.[0] ?? user?.email?.[0] ?? "U").toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-bold">{user?.firstName || "Account"}</div>
+              <Link href="/app/account" className="block truncate text-sm font-bold hover:text-primary transition-colors cursor-pointer">
+                 {user?.firstName || "Account"}
+              </Link>
               <button onClick={() => logout()} disabled={isLoggingOut} className="text-[11px] font-semibold text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1 mt-0.5">
                  <LogOut className="h-3 w-3" /> Sign out
               </button>

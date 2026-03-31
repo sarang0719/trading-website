@@ -63,7 +63,7 @@ export default function Portfolio() {
              {holdings.length > 0 ? (
                <div className="flex flex-col sm:flex-row items-center gap-6">
                   <div className="h-[140px] w-[140px] shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                       <PieChart>
                         <Pie
                           data={pieData}

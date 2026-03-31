@@ -121,7 +121,7 @@ export default function Dashboard() {
                       </div>
 
                       <div className="hidden md:block flex-1 max-w-[120px] h-10 mx-8">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                           <AreaChart data={sparkData}>
                             <defs>
                               <linearGradient id={`grad-${h.instrument.id}`} x1="0" y1="0" x2="0" y2="1">

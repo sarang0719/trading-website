@@ -179,8 +179,8 @@ function TradeRow({ t }: { t: BotTrade }) {
 
 export default function Strategy() {
   const [symbol,   setSymbol]   = useState("BTCUSDT");
-  const [timeframe, setTf]      = useState("1D");
-  const [bot,      setBot]      = useState<BotState>(() => createBotState("BTCUSDT", "1d"));
+  const [timeframe, setTf]      = useState("1m");
+  const [bot,      setBot]      = useState<BotState>(() => createBotState("BTCUSDT", "1m"));
   const [candles,  setCandles]  = useState<Candle[]>([]);
   const [price,    setPrice]    = useState<number>(0);
   const [loading,  setLoading]  = useState(false);
@@ -190,7 +190,12 @@ export default function Strategy() {
   const wsRef      = useRef<WebSocket | null>(null);
   const intervalId = useRef<any>(null);
   const botRef     = useRef<BotState>(bot);
+  const candlesRef = useRef<Candle[]>([]);
+  const priceRef   = useRef<number>(0);
+
   botRef.current   = bot;
+  candlesRef.current = candles;
+  priceRef.current = price;
 
   // ── Fetch historical candles ────────────────────────────────────────────
   const fetchCandles = useCallback(async (sym: string, tf: string) => {
@@ -253,15 +258,16 @@ export default function Strategy() {
 
   // ── Run bot tick every 5s ───────────────────────────────────────────────
   useEffect(() => {
-    clearInterval(intervalId.current);
     intervalId.current = setInterval(() => {
-      if (!botRef.current.running || !candles.length) return;
-      const lp = price || candles[candles.length - 1]?.close;
+      const currentCandles = candlesRef.current;
+      const currentPrice = priceRef.current;
+      if (!botRef.current.running || !currentCandles.length) return;
+      const lp = currentPrice || currentCandles[currentCandles.length - 1]?.close;
       if (!lp) return;
-      setBot(prev => tickBot(prev, candles, lp));
+      setBot(prev => tickBot(prev, currentCandles, lp));
     }, 5000);
     return () => clearInterval(intervalId.current);
-  }, [candles, price]);
+  }, []);
 
   // ── Symbol / TF change → reload ─────────────────────────────────────────
   const load = useCallback(async (sym: string, tf: string) => {
@@ -271,8 +277,7 @@ export default function Strategy() {
     connectWs(sym, tf);
     return c;
   }, [fetchCandles, connectWs]);
-
-  useEffect(() => { load("BTCUSDT", "1D"); }, []); // eslint-disable-line
+  useEffect(() => { load("BTCUSDT", "1m"); }, []); // eslint-disable-line
 
   // ── Train button ────────────────────────────────────────────────────────
   const handleTrain = useCallback(() => {

@@ -140,6 +140,31 @@ export async function registerRoutes(
     res.json(updated);
   });
 
+  app.get(api.timeTrades.list.path, isAuthenticated, async (req: any, res) => {
+    const userId = req.user.claims.sub as string;
+    const list = await storage.listTimeBasedOrders(userId);
+    res.json(list);
+  });
+
+  app.post(api.timeTrades.create.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const input = api.timeTrades.create.input.parse(req.body);
+      
+      const order = await storage.createTimeBasedOrder(userId, input as any);
+      res.status(201).json(order);
+    } catch (err: any) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0]?.message ?? "Invalid request",
+          field: err.errors[0]?.path?.join("."),
+        });
+      }
+      // Return 400 for Risk Management or other custom errors
+      return res.status(400).json({ message: err.message || "Invalid request" });
+    }
+  });
+
   app.get(api.market.news.path, async (_req, res) => {
     const news = await storage.getNews();
     res.json(news);
@@ -155,6 +180,17 @@ export async function registerRoutes(
     const article = await storage.getLearn(id);
     if (!article) return res.status(404).json({ message: "Article not found" });
     res.json(article);
+  });
+
+  app.post(api.settings.aiTrade.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const input = api.settings.aiTrade.input.parse(req.body);
+      await storage.updateAiTradeConsent(userId, input.enabled);
+      res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(400).json({ message: err.message || "Invalid request" });
+    }
   });
 
   return httpServer;

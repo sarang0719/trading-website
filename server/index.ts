@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { startBackgroundTasks } from "./background";
+import { startAiBotEngine } from "./ai-bot";
 
 const app = express();
 const httpServer = createServer(app);
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
   const { db } = await import("./db");
   await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "migrations") });
   startBackgroundTasks();
+  startAiBotEngine();
 
   await registerRoutes(httpServer, app);
 

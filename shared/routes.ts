@@ -13,6 +13,8 @@ import {
   type WatchlistsListResponse,
   type InstrumentsListResponse,
   type OrdersListResponse,
+  type TimeBasedOrder,
+  insertTimeBasedOrderSchema
 } from "./schema";
 
 export const errorSchemas = {
@@ -159,6 +161,40 @@ export const api = {
       },
     },
   },
+  timeTrades: {
+    list: {
+      method: "GET" as const,
+      path: "/api/time-trades" as const,
+      responses: {
+        200: z.array(z.custom<TimeBasedOrder>()),
+        401: errorSchemas.unauthorized,
+      },
+    },
+    create: {
+      method: "POST" as const,
+      path: "/api/time-trades" as const,
+      input: insertTimeBasedOrderSchema,
+      responses: {
+        201: z.custom<TimeBasedOrder>(),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
+  },
+  settings: {
+    aiTrade: {
+      method: "POST" as const,
+      path: "/api/settings/ai-trade" as const,
+      input: z.object({
+        enabled: z.boolean(),
+      }),
+      responses: {
+        200: z.object({ ok: z.boolean() }),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+      },
+    },
+  },
   market: {
     news: {
       method: "GET" as const,
@@ -207,6 +243,7 @@ export type CreateWatchlistInput = z.infer<typeof api.watchlists.create.input>;
 export type AddWatchlistItemInput = z.infer<typeof api.watchlists.addItem.input>;
 export type CreatePortfolioInput = z.infer<typeof api.portfolio.create.input>;
 export type CreateOrderInput = z.infer<typeof api.orders.create.input>;
+export type CreateTimeBasedOrderInput = z.infer<typeof api.timeTrades.create.input>;
 export type ValidationError = z.infer<typeof errorSchemas.validation>;
 export type NotFoundError = z.infer<typeof errorSchemas.notFound>;
 export type UnauthorizedError = z.infer<typeof errorSchemas.unauthorized>;

@@ -3,9 +3,9 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-
 import NotFound from "@/pages/not-found";
 import HomeGate from "@/pages/HomeGate";
+import AIConsentModal from "@/components/AIConsentModal";
 import AppIndex from "@/pages/AppIndex";
 import Watchlists from "@/pages/Watchlists";
 import WatchlistDetail from "@/pages/WatchlistDetail";
@@ -20,6 +20,7 @@ import MarketDetail from "@/pages/MarketDetail";
 import Settings from "@/pages/Settings";
 import NotFoundApp from "@/pages/NotFoundApp";
 import Strategy from "@/pages/Strategy";
+import Account from "@/pages/Account";
 
 function Router() {
   return (
@@ -41,6 +42,7 @@ function Router() {
       <Route path="/app/insights" component={AIInsights} />
       <Route path="/app/settings" component={Settings} />
       <Route path="/app/strategy" component={Strategy} />
+      <Route path="/app/account" component={Account} />
 
       {/* Nice 404 for app routes */}
       <Route path="/app/:rest*" component={NotFoundApp as any} />
@@ -56,6 +58,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <AIConsentModal />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>
