@@ -40,6 +40,7 @@ export const users = pgTable(
     lastName: varchar("last_name"),
     profileImageUrl: varchar("profile_image_url"),
     autoTradeEnabled: boolean("auto_trade_enabled"),
+    autoTradeAmount: varchar("auto_trade_amount").default("5.00"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },

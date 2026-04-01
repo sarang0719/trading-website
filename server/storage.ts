@@ -44,7 +44,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: UpsertUser): Promise<User>;
-  updateAiTradeConsent(userId: string, enabled: boolean): Promise<void>;
+  updateAiTradeConsent(userId: string, enabled?: boolean, amount?: string): Promise<void>;
   listInstruments(input?: {
     q?: string;
     assetClass?: string;
@@ -95,8 +95,14 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async updateAiTradeConsent(userId: string, enabled: boolean): Promise<void> {
-    await db.update(users).set({ autoTradeEnabled: enabled }).where(eq(users.id, userId));
+  async updateAiTradeConsent(userId: string, enabled?: boolean, amount?: string): Promise<void> {
+    const payload: Partial<User> = {};
+    if (enabled !== undefined) payload.autoTradeEnabled = enabled;
+    if (amount !== undefined) payload.autoTradeAmount = amount;
+    
+    if (Object.keys(payload).length > 0) {
+      await db.update(users).set(payload).where(eq(users.id, userId));
+    }
   }
 
   async listInstruments(input?: { q?: string; assetClass?: string; exchange?: string }): Promise<(Instrument & { price?: LatestPrice })[]> {

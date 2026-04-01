@@ -70,19 +70,21 @@ export function startAiBotEngine() {
              // Shorter 30s trades for faster profit cycles
              const expiresAt = new Date(Date.now() + 30 * 1000);
 
+             const userAmount = user.autoTradeAmount || "5.00";
+
              await db.insert(timeBasedOrders).values({
                userId: user.id,
                instrumentId: inst.id,
                placedBy: "AI_BOT", 
                side: signal,
-               amount: "5.00",
+               amount: userAmount,
                strikePrice: String(price),
                durationSeconds: 30,
                expiresAt,
                status: "ACTIVE" as any,
              });
 
-             console.log(`[AI Bot v2.0] ${signal} on ${sym} @ ${price} for User ${user.email || user.id} (Score: ${score}/10)`);
+             console.log(`[AI Bot v2.0] ${signal} on ${sym} @ ${price} for User ${user.email || user.id} (Score: ${score}/10, Amount: $${userAmount})`);
            } catch {
              // Ignore individual placement errors 
            }

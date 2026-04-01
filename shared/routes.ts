@@ -186,7 +186,8 @@ export const api = {
       method: "POST" as const,
       path: "/api/settings/ai-trade" as const,
       input: z.object({
-        enabled: z.boolean(),
+        enabled: z.boolean().optional(),
+        amount: z.string().optional(),
       }),
       responses: {
         200: z.object({ ok: z.boolean() }),

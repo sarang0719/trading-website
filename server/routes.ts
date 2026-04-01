@@ -186,7 +186,7 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub as string;
       const input = api.settings.aiTrade.input.parse(req.body);
-      await storage.updateAiTradeConsent(userId, input.enabled);
+      await storage.updateAiTradeConsent(userId, input.enabled, input.amount);
       res.json({ ok: true });
     } catch (err: any) {
       return res.status(400).json({ message: err.message || "Invalid request" });
