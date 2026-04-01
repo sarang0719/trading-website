@@ -89,7 +89,7 @@ export default function WatchlistDetail() {
       title={title}
       subtitle="Add instruments, track price moves, and fire a paper order in one motion."
     >
-      <Seo title={`${title} • Watchlists • Aurum Paper`} description="Watchlist details and items." />
+      <Seo title={`${title} • Watchlists • HTC Trade`} description="Watchlist details and items." />
 
       <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <Link

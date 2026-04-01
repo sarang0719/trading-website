@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useMemo, useEffect, useRef, lazy, Suspense, useCallback } from "react";
 import { useRoute, Link } from "wouter";
 import AppShell from "@/components/AppShell";
 import Seo from "@/components/Seo";
@@ -27,9 +27,12 @@ import { cn } from "@/lib/utils";
 import OrderTicketDialog from "@/components/OrderTicketDialog";
 import { useInstruments } from "@/hooks/use-instruments";
 import { useTimeTrades } from "@/hooks/use-time-trades";
-import { Clock, PlusCircle, MinusCircle, CheckCircle, XCircle, BrainCircuit } from "lucide-react";
+import { Clock, PlusCircle, MinusCircle, CheckCircle, XCircle, BrainCircuit, Zap, TrendingDown, ChevronRight, Lock } from "lucide-react";
 import QuotexOverlay from "@/components/QuotexOverlay";
 import { calculatePnL } from "@/lib/pnl";
+import type { CandlePrediction } from "@/lib/candle-predictor";
+import { useAiCredits } from "@/hooks/useAiCredits";
+import { AiPaymentModal } from "@/components/AiPaymentModal";
 
 // Lazy-load heavy strategy panel
 const StrategyPanel = lazy(() => import("@/components/StrategyPanel"));
@@ -52,7 +55,7 @@ function fmtPct(n?: number) {
 // ── Timeframe Map ──────────────────────────────────────────────────────────
 
 const TF_MAP: Record<string, string> = {
-  "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1m": "1m", "2m": "2m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
   "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
 };
 
@@ -98,10 +101,11 @@ const CandleTimer = ({ interval }: { interval: string }) => {
   if (!timeLeft) return null;
 
   return (
-    <div className="absolute right-16 bottom-[80px] z-[25] pointer-events-none">
-       <div className="bg-background/80 backdrop-blur-md border border-border/40 text-muted-foreground tracking-widest px-2.5 py-1 rounded shadow-sm text-[10px] font-mono flex items-center gap-1.5">
+    <div className="absolute right-14 bottom-[80px] z-[25] pointer-events-none">
+       <div className="bg-background/90 backdrop-blur-md border border-border/60 text-muted-foreground px-2 py-1 rounded shadow-sm text-[11px] font-mono flex items-center gap-1.5 transition-all">
           <Clock className="w-3 h-3 text-primary animate-pulse" />
-          <span className="font-bold">{timeLeft}</span>
+          <span>Candle close:</span>
+          <span className="font-bold text-primary">{timeLeft}</span>
        </div>
     </div>
   );
@@ -135,7 +139,8 @@ export default function MarketDetail() {
   const isUp        = Number(priceData?.changePct ?? 0) >= 0;
 
   const [tradeAmount, setTradeAmount] = useState(5);
-  const [tradeDuration, setTradeDuration] = useState(60);
+  // tradeDuration is always aligned with the chart timeframe (candle period)
+  const [tradeDuration, setTradeDuration] = useState(60); // default: 1m candle
   const [livePrice, setLivePrice] = useState<number | null>(null);
   
   // Custom Candle Detail Hover states
@@ -191,31 +196,100 @@ export default function MarketDetail() {
   const [autoTradeActive, setAutoTradeActive] = useState(false);
   const [sessionPnL, setSessionPnL] = useState(0);
   const [showAiBotPopup, setShowAiBotPopup] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
 
-  // AI Signal Engine using real strategy (Optimized for High Accuracy >90%)
+  // AI Credits system
+  const { credits, fetchCredits, usePrediction } = useAiCredits();
+  const isAdminUser = credits?.isAdmin ?? false;
+  const isUnlimited = credits?.unlimited ?? false;
+  const freeRemaining = credits ? Math.max(0, credits.freePredictionsLimit - credits.freePredictionsUsed) : 6;
+  const totalRemaining = credits ? freeRemaining + credits.paidCredits : 6;
+  const canUseAi = isUnlimited || (credits ? credits.canUse : true); // admins always true
+
+  // Gate: consume a credit when the user opens the bot popup
+  const handleOpenBotPopup = useCallback(async () => {
+    if (!showAiBotPopup) {
+      // Admins skip credit check entirely
+      if (!isUnlimited) {
+        if (!canUseAi) {
+          setShowPaymentModal(true);
+          return;
+        }
+        const result = await usePrediction();
+        if (!result.granted) {
+          setShowPaymentModal(true);
+          return;
+        }
+      }
+    }
+    setShowAiBotPopup(v => !v);
+  }, [showAiBotPopup, canUseAi, isUnlimited, usePrediction]);
+  const [prediction, setPrediction] = useState<CandlePrediction | null>(null);
+  const [predCountdown, setPredCountdown] = useState("");
+  const [showPredFactors, setShowPredFactors] = useState(false);
+  const lastCandleTimeRef = useRef<number>(0);
+
+  // ── Next-Candle Predictor Engine (fires on every candle close) ──────────
   useEffect(() => {
     if (!instrument) return;
-    const interval = setInterval(async () => {
+
+    // Candle duration in seconds
+    let candleSecs = 60;
+    const tfMatch = timeframe.match(/^(\d+)([a-zA-Z]+)$/);
+    if (tfMatch) {
+      const v = parseInt(tfMatch[1]), u = tfMatch[2];
+      if (u === "m") candleSecs = v * 60;
+      else if (u === "H" || u === "h") candleSecs = v * 3600;
+      else if (u === "D" || u === "d") candleSecs = v * 86400;
+      else if (u === "W" || u === "w") candleSecs = v * 604800;
+      else if (u === "M") candleSecs = v * 2592000;
+    }
+
+    const runPredictor = async (candles: any[]) => {
       try {
-        const cands = candlesRef.current;
-        if (cands.length > 5) {
-           const { runEngine } = await import("@/lib/strategy-engine");
-           // Run base logic for realistic simulation
-           runEngine(cands, { useSession: false });
-           
-           // Apply extremely highly accurate AI prediction lookahead
-           const currentPrice = cands[cands.length - 1].close;
-           const previousPrice = cands[cands.length - 4].close;
-           const trendUp = currentPrice >= previousPrice;
-           
-           setAiSignal(trendUp ? "BUY" : "SELL");
-           // Force high accuracy confidence (93% - 99%)
-           setAiConfidence(Math.floor(Math.random() * 7) + 93);
+        const { predictNextCandle } = await import("@/lib/candle-predictor");
+        // Use only the last 300 CLOSED candles (exclude the live one)
+        const closed = candles.slice(0, -1);
+        const pred = predictNextCandle(closed, candleSecs);
+        if (pred) {
+          setPrediction(pred);
+          setAiSignal(pred.direction);
+          setAiConfidence(pred.probability);
         }
       } catch (e) {}
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [instrument]);
+    };
+
+    // Poll every second — detect when a NEW candle starts (candle close event)
+    const poller = setInterval(() => {
+      const candles = candlesRef.current;
+      if (candles.length < 2) return;
+      const latestTime = candles[candles.length - 1].time;
+      if (latestTime !== lastCandleTimeRef.current) {
+        lastCandleTimeRef.current = latestTime;
+        // A new candle just opened → run prediction on the now-closed candles
+        runPredictor(candles);
+      }
+    }, 500);
+
+    // Countdown to next candle
+    const countdownTimer = setInterval(() => {
+      const now = Math.floor(Date.now() / 1000);
+      const rem = candleSecs - (now % candleSecs);
+      const m = Math.floor(rem / 60);
+      const s = rem % 60;
+      setPredCountdown(`${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`);
+
+      // 5 seconds before candle close — trigger one final prediction update
+      if (rem <= 5 && rem > 0) {
+        runPredictor(candlesRef.current);
+      }
+    }, 1000);
+
+    // Run once immediately on mount
+    setTimeout(() => runPredictor(candlesRef.current), 2000);
+
+    return () => { clearInterval(poller); clearInterval(countdownTimer); };
+  }, [instrument, timeframe]);
 
   // Watch past trades to update session PnL
   useEffect(() => {
@@ -385,7 +459,14 @@ export default function MarketDetail() {
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.08)", timeVisible: true, secondsVisible: false },
+      timeScale: { 
+        borderColor: "rgba(255,255,255,0.08)", 
+        timeVisible: true, 
+        secondsVisible: false,
+        rightOffset: 5,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+      },
       width:  chartContainerRef.current.clientWidth || 300,
       height: chartContainerRef.current.clientHeight || 400,
     });
@@ -492,11 +573,12 @@ export default function MarketDetail() {
     const loadData = async () => {
       let baseData: any[] = [];
 
-      // Only attempt Binance fetch for BINANCE exchange cryptocurrencies
-      if (instrument?.exchange === "BINANCE") {
+      if (baseData.length === 0 && (instrument?.exchange === "BINANCE" || instrument?.symbol === "XAUUSD" || instrument?.assetClass === "CRYPTO")) {
         try {
+          // Use PAXGUSDT proxy for perfectly real XAUUSD charting without mock variation
+          const binanceSymbol = instrument?.symbol === "XAUUSD" ? "PAXGUSDT" : instrument?.symbol;
           const res = await fetch(
-            `https://api.binance.com/api/v3/klines?symbol=${instrument.symbol}&interval=${interval}&limit=1000`,
+            `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=1000`,
             { signal: abortCtrl.signal }
           );
           if (res.ok) {
@@ -529,14 +611,14 @@ export default function MarketDetail() {
           }
 
           const res = await fetch(
-            `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=b630be1ed9604a29a35ad8d11a8af18c&outputsize=500`,
+            `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=b630be1ed9604a29a35ad8d11a8af18c&outputsize=500&timezone=UTC`,
             { signal: abortCtrl.signal }
           );
           if (res.ok) {
             const raw = await res.json();
             if (isActive && raw.values && Array.isArray(raw.values)) {
               baseData = raw.values.reverse().map((d: any) => ({
-                time:   (new Date(d.datetime).getTime() / 1000) as UTCTimestamp,
+                time:   (new Date(d.datetime + " UTC").getTime() / 1000) as UTCTimestamp,
                 open:   parseFloat(d.open),
                 high:   parseFloat(d.high),
                 low:    parseFloat(d.low),
@@ -560,12 +642,15 @@ export default function MarketDetail() {
         else if (interval.endsWith("d")) candleSecs = parseInt(interval) * 86400;
         else if (interval.endsWith("m")) candleSecs = parseInt(interval) * 60;
 
-        const volatility = walkPrice * 0.0008;
+        // Align the latest candle to a proper boundary so new-candle detection works
+        const alignedNow = Math.floor(now / candleSecs) * candleSecs;
+
+        const volatility = walkPrice * 0.00015; // Realistic candle sizes (e.g. ~$0.70 for Gold, ~$9 for BTC)
         const mockData = [];
         
         // Walk forward to generate smooth candles culminating near current real price
         for (let i = limit; i >= 0; i--) {
-          const time = (now - (i * candleSecs)) as UTCTimestamp;
+          const time = (alignedNow - (i * candleSecs)) as UTCTimestamp;
           const open = walkPrice;
           const close = open + ((Math.random() - 0.48) * volatility); // Slight upward bias for realism
           const high = Math.max(open, close) + Math.random() * (volatility * 0.5);
@@ -605,7 +690,10 @@ export default function MarketDetail() {
           color: d.close >= d.open ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)",
         })));
         
-        // Auto-Zoom properly upon data load using exact activeRange rules
+        // After setting data, fit all candles then apply zoom range
+        chart.timeScale().fitContent();
+        
+        // Then apply range zoom on top
         const last = baseData[baseData.length - 1].time;
         let from = baseData[0].time;
         const r = activeRange;
@@ -620,12 +708,14 @@ export default function MarketDetail() {
           from = Math.floor(d.getTime() / 1000);
         }
         else if (r === "1Y") from = last - (86400 * 365);
-        else if (r === "ALL") from = last - (86400 * 1095); // Exactly 3 years
+        else if (r === "ALL") { /* keep fitContent zoom */ from = baseData[0].time; }
         
-        chart.timeScale().setVisibleRange({ 
-          from: Math.max(from, baseData[0].time) as UTCTimestamp, 
-          to: (last + (last - from) * 0.05) as UTCTimestamp 
-        });
+        if (r !== "ALL") {
+          chart.timeScale().setVisibleRange({ 
+            from: Math.max(from, baseData[0].time) as UTCTimestamp, 
+            to: (last + 60) as UTCTimestamp 
+          });
+        }
 
         // Store candles and calculate indicators
         candlesRef.current = baseData;
@@ -658,14 +748,28 @@ export default function MarketDetail() {
       let targetPrice = currentPrice;
       let lastWsTime = Date.now();
 
+      // Calculate candle duration in seconds for new-candle detection
+      let candleSecs = 60; // Default 1m
+      const intMatch = interval.match(/^(\d+)([a-zA-Z]+)$/);
+      if (intMatch) {
+        const val = parseInt(intMatch[1]);
+        const unit = intMatch[2];
+        if (unit === "m") candleSecs = val * 60;
+        else if (unit === "h") candleSecs = val * 3600;
+        else if (unit === "d") candleSecs = val * 86400;
+        else if (unit === "w") candleSecs = val * 604800;
+        else if (unit === "M") candleSecs = val * 2592000;
+      }
+
       // The core animation loop for Quotex feel (runs at 10 FPS)
       simInterval = setInterval(() => {
         if (!isActive || !mainSeries) return;
         
         const now = Date.now();
-        // If it's been over 3 seconds without a binance tick, sprinkle tiny noise so it never completely freezes
+        // If it's been over 3 seconds without a binance/twelvedata tick, sprinkle tiny noise so it never completely freezes
+        // Reduced noise significantly (from 0.0002 to 0.000015) to prevent massive fake wicks on Gold/Stocks
         if (now - lastWsTime > 3000) {
-           targetPrice = currentPrice + (Math.random() - 0.5) * (currentPrice * 0.0002);
+           targetPrice = currentPrice + (Math.random() - 0.5) * (currentPrice * 0.000015);
         }
 
         // Smoothly step 'currentPrice' towards 'targetPrice' instead of jumping
@@ -679,24 +783,74 @@ export default function MarketDetail() {
           const dataArr = mainSeries.data();
           if (dataArr && dataArr.length > 0) {
             const lastData = dataArr[dataArr.length - 1] as any;
-            
-            // Create a fluid new tick update
-            mainSeries.update({
-              time: lastData.time,
-              open: lastData.open,
-              high: Math.max(lastData.high, currentPrice),
-              low: Math.min(lastData.low, currentPrice),
-              close: currentPrice,
-              value: currentPrice
-            });
+            const nowSec = Math.floor(now / 1000);
+            const lastCandleTime = lastData.time as number;
+
+            // Check if a full candle period has elapsed since the last candle
+            // Use the next aligned boundary after the last candle's time
+            const nextCandleTime = lastCandleTime + candleSecs;
+
+            if (nowSec >= nextCandleTime) {
+              // --- Time period elapsed: create a NEW candle ---
+              // Snap to the proper aligned boundary for clean timestamps
+              const newCandleTime = Math.floor(nowSec / candleSecs) * candleSecs;
+              // If aligned time equals lastCandleTime (unlikely but possible), step forward
+              const finalTime = newCandleTime > lastCandleTime ? newCandleTime : lastCandleTime + candleSecs;
+
+              const newCandle = {
+                time: finalTime as UTCTimestamp,
+                open: currentPrice,
+                high: currentPrice,
+                low: currentPrice,
+                close: currentPrice,
+                value: currentPrice,
+              };
+              mainSeries.update(newCandle);
+
+              // Also append a volume bar for the new candle
+              if (volumeSeries) {
+                volumeSeries.update({
+                  time: finalTime as UTCTimestamp,
+                  value: 0,
+                  color: "rgba(34,197,94,0.7)",
+                });
+              }
+
+              // Update candles ref
+              const cRef = candlesRef.current;
+              cRef.push({ ...newCandle, volume: 0 });
+              if (cRef.length > 1500) cRef.shift();
+            } else {
+              // --- Still within the current candle: update it ---
+              mainSeries.update({
+                time: lastData.time,
+                open: lastData.open,
+                high: Math.max(lastData.high, currentPrice),
+                low: Math.min(lastData.low, currentPrice),
+                close: currentPrice,
+                value: currentPrice,
+              });
+
+              // Keep candlesRef in sync
+              const cRef = candlesRef.current;
+              if (cRef.length > 0) {
+                const last = cRef[cRef.length - 1];
+                if (last.time === lastData.time) {
+                  last.high = Math.max(last.high, currentPrice);
+                  last.low = Math.min(last.low, currentPrice);
+                  last.close = currentPrice;
+                }
+              }
+            }
           }
         } catch {}
       }, 100);
 
-      // Connect to Live API Data for precise targets
-      if (isActive && instrument?.exchange === "BINANCE") {
+        // Connect to Live API Data for precise targets
+      if (isActive && (instrument?.exchange === "BINANCE" || instrument?.symbol === "XAUUSD")) {
         try {
-          ws = new WebSocket(`wss://stream.binance.com:9443/ws/${instrument.symbol.toLowerCase()}@kline_${interval}`);
+          const wsSymbol = instrument?.symbol === "XAUUSD" ? "paxgusdt" : instrument.symbol.toLowerCase();
+          ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
           ws.onerror = (e) => { console.error("Binance WS Drop:", e); };
           ws.onmessage = (ev) => {
             if (!isActive) return;
@@ -796,7 +950,7 @@ export default function MarketDetail() {
 
   return (
     <AppShell noPadding>
-      <Seo title={`${instrument.symbol} • ${instrument.name} • Aurum Paper`} />
+      <Seo title={`${instrument.symbol} • ${instrument.name} • HTC Trade`} />
 
       {/*
         ┌── ROOT: responsive 3-column desktop / stacked mobile ──────────────┐
@@ -937,12 +1091,17 @@ export default function MarketDetail() {
         </div>
 
         {/* ── QUOTEX STYLE RIGHT SIDEBAR ── */}
-        <div className="w-full lg:w-[300px] xl:w-[320px] shrink-0 flex flex-col border-t lg:border-t-0 lg:border-l border-border/40 bg-[#161a25] lg:overflow-y-auto pb-safe">
+        {/* Two-zone layout: top scrolls, history always pinned at bottom */}
+        <div className="w-full lg:w-[300px] xl:w-[320px] shrink-0 flex flex-col border-t lg:border-t-0 lg:border-l border-border/40 bg-[#161a25] lg:h-full">
+          {/* TOP ZONE: scrollable section containing all controls */}
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+
 
           {/* AI COPILOT SECTION */}
           <div className="p-4 border-b border-border/20 bg-primary/5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> AI Market Analysis</h3>
+              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> AI Confirmation
+              </h3>
                <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider", aiSignal === "BUY" ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
                  {aiSignal} ({aiConfidence}%)
                </span>
@@ -1019,20 +1178,27 @@ export default function MarketDetail() {
               </div>
             </div>
 
-            {/* Time / Duration Input */}
+            {/* Time / Duration — controls BOTH chart candle timeframe + trade expiry */}
             <div className="mb-5">
-              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1.5 block">Time Duration</label>
+              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1.5 block">Candle Timeframe</label>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: "10s", val: 10 }, { label: "30s", val: 30 }, { label: "1m", val: 60 },
-                  { label: "2m", val: 120 }, { label: "3m", val: 180 }, { label: "15m", val: 900 }
+                  { label: "1m",  tf: "1m",  secs: 60   },
+                  { label: "2m",  tf: "2m",  secs: 120  },
+                  { label: "3m",  tf: "3m",  secs: 180  },
+                  { label: "5m",  tf: "5m",  secs: 300  },
+                  { label: "15m", tf: "15m", secs: 900  },
+                  { label: "30m", tf: "30m", secs: 1800 },
                 ].map((d) => (
                   <button
-                    key={d.val}
-                    onClick={() => setTradeDuration(d.val)}
+                    key={d.tf}
+                    onClick={() => {
+                      setTimeframe(d.tf);       // switch chart candle interval
+                      setTradeDuration(d.secs); // trade expires at end of that candle
+                    }}
                     className={cn(
                       "py-2 rounded-lg text-xs font-bold transition-all border",
-                      tradeDuration === d.val
+                      timeframe === d.tf
                         ? "bg-primary/20 text-primary border-primary/50 shadow-sm"
                         : "bg-[#232936] text-muted-foreground border-transparent hover:bg-white/5"
                     )}
@@ -1041,6 +1207,9 @@ export default function MarketDetail() {
                   </button>
                 ))}
               </div>
+              <p className="text-[9px] text-muted-foreground mt-1.5 px-0.5">
+                Chart shows <span className="text-foreground font-semibold">{timeframe}</span> candles · trade closes at next candle
+              </p>
             </div>
 
             {/* Payout Expection */}
@@ -1112,9 +1281,12 @@ export default function MarketDetail() {
             </div>
           )}
 
-          {/* TRADE HISTORY */}
-          <div className="flex-1 p-4 overflow-y-auto min-h-0">
-             <h3 className="text-xs font-bold text-muted-foreground uppercase mb-3"><History className="w-3.5 h-3.5 inline mr-1" /> History</h3>
+          </div>{/* END TOP ZONE */}
+
+          {/* BOTTOM ZONE: History always pinned, min 200px, own scroll */}
+          <div className="shrink-0 flex flex-col border-t border-border/20 bg-[#161a25]" style={{ minHeight: '200px', maxHeight: '38%' }}>
+             <h3 className="text-xs font-bold text-muted-foreground uppercase mb-3 shrink-0 px-4 pt-4"><History className="w-3.5 h-3.5 inline mr-1" /> History</h3>
+             <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
              {pastTrades.length === 0 ? (
                <div className="text-center text-xs text-muted-foreground py-6">No recent trades.</div>
              ) : (
@@ -1143,43 +1315,160 @@ export default function MarketDetail() {
                    );
                  })}
                </div>
-             )}
-          </div>
-        </div>
+              )}
+             </div>
+           </div>
+         </div>
       </div>
 
-      {/* ── FLOATING AI ASSISTANT (Bottom Right) ── */}
+      {/* ── FLOATING QUANTEDGE AI BOT (Bottom Right) ── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end pointer-events-none">
          <div className="relative">
             <div className={cn("absolute inset-0 bg-primary/20 blur-xl rounded-full transition-opacity duration-500 pointer-events-none", showAiBotPopup ? "opacity-100" : "opacity-0")} />
-            <div className={cn("absolute bottom-16 right-0 w-64 bg-card/95 backdrop-blur-md border border-primary/20 rounded-2xl p-4 shadow-2xl transition-all duration-300 origin-bottom-right", showAiBotPopup ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-4 pointer-events-none")}>
-               <div className="flex items-center gap-2 mb-2">
-                 <BrainCircuit className="w-5 h-5 text-primary" />
-                 <h4 className="font-bold text-sm">QuantEdge AI</h4>
-               </div>
-               <p className="text-xs text-muted-foreground leading-relaxed mb-3">
-                 Need help? I've analyzed the current <strong>{timeframe}</strong> chart for <strong>{instrument.symbol}</strong> using our advanced strategy engine.
-               </p>
-               <div className={cn("p-2 rounded-lg text-xs font-bold border", aiSignal === "BUY" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20")}>
-                 <div className="flex justify-between items-center mb-1">
-                   <span>Recommended action:</span>
-                   <span className="text-sm">{aiSignal === "BUY" ? "UP" : "DOWN"}</span>
-                 </div>
-                 <div className="flex justify-between items-center opacity-80">
-                   <span>Time duration:</span>
-                   <span>{timeframe === "1m" ? "1-3 min" : timeframe === "5m" ? "5-15 min" : "1 hour+"}</span>
-                 </div>
-               </div>
-               <div className="mt-3 text-[10px] text-center text-muted-foreground">
-                 Confidence rating: <span className="font-bold text-foreground">{aiConfidence}%</span>
-               </div>
-            </div>
             
-            <button onClick={() => setShowAiBotPopup(!showAiBotPopup)} className="pointer-events-auto relative w-14 h-14 bg-gradient-to-tr from-primary to-primary/80 text-primary-foreground rounded-full flex items-center justify-center shadow-lg hover:shadow-primary/25 hover:scale-105 transition-all duration-300 cursor-pointer float-right z-10">
-              <BrainCircuit className="w-7 h-7" />
-            </button>
+            {/* Rich prediction popup */}
+            <div className={cn(
+              "absolute bottom-16 right-0 w-72 bg-[#0f1420]/98 backdrop-blur-xl border rounded-2xl shadow-2xl transition-all duration-300 origin-bottom-right overflow-hidden",
+              prediction?.direction === "BUY" ? "border-emerald-500/30" : "border-rose-500/30",
+              showAiBotPopup ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-4 pointer-events-none"
+            )}>
+              {/* Header */}
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
+                <BrainCircuit className="w-5 h-5 text-primary" />
+                <div className="flex-1">
+                  <h4 className="font-bold text-sm">QuantEdge AI</h4>
+                  <p className="text-[9px] text-muted-foreground">{instrument.symbol} · {timeframe} · {prediction ? "Analysis ready" : "Analyzing..."}</p>
+                </div>
+                <Zap className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
+              </div>
+
+              {prediction ? (
+                <div className="p-4 space-y-3">
+                  {/* Next Candle Prediction */}
+                  <div className={cn(
+                    "rounded-xl p-3 border",
+                    prediction.direction === "BUY"
+                      ? "bg-emerald-500/10 border-emerald-500/25"
+                      : "bg-rose-500/10 border-rose-500/25"
+                  )}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Next Candle</span>
+                      <span className="text-[9px] font-mono text-muted-foreground">⏱ {predCountdown}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {prediction.direction === "BUY"
+                          ? <TrendingUp className="w-6 h-6 text-emerald-400" />
+                          : <TrendingDown className="w-6 h-6 text-rose-400" />}
+                        <span className={cn(
+                          "text-2xl font-black",
+                          prediction.direction === "BUY" ? "text-emerald-400" : "text-rose-400"
+                        )}>
+                          {prediction.direction === "BUY" ? "UP" : "DOWN"}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className={cn(
+                          "text-2xl font-black",
+                          prediction.direction === "BUY" ? "text-emerald-400" : "text-rose-400"
+                        )}>
+                          {prediction.probability}%
+                        </div>
+                        <div className="text-[9px] text-muted-foreground">success rate</div>
+                      </div>
+                    </div>
+                    {/* confidence bar */}
+                    <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
+                      <div
+                        className={cn("h-full rounded-full transition-all duration-700",
+                          prediction.direction === "BUY" ? "bg-emerald-500" : "bg-rose-500"
+                        )}
+                        style={{ width: `${prediction.probability}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Why section — top 5 factors */}
+                  <div>
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Why this call?</p>
+                    <div className="space-y-1.5">
+                      {prediction.factors.slice(0, 6).map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 text-[10px]">
+                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0",
+                            f.vote === "BUY" ? "bg-emerald-400" : f.vote === "SELL" ? "bg-rose-400" : "bg-yellow-400"
+                          )} />
+                          <span className="text-muted-foreground flex-1 truncate">{f.name}</span>
+                          <span className={cn("font-bold shrink-0 text-[9px]",
+                            f.vote === "BUY" ? "text-emerald-400" : f.vote === "SELL" ? "text-rose-400" : "text-yellow-500"
+                          )}>
+                            {f.vote === "NEUTRAL" ? "–" : f.vote === "BUY" ? "↑ UP" : "↓ DOWN"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Strategy confirmation */}
+                  <div className="text-center pt-1 border-t border-white/5">
+                    <p className="text-[10px] text-muted-foreground">
+                      {prediction.factors.filter(f => f.vote === prediction.direction).length} of {prediction.factors.length} indicators agree
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">
+                  Analyzing {timeframe} chart…
+                </div>
+              )}
+            </div>
+
+            {/* Credit badge + Bot button */}
+            <div className="flex flex-col items-end gap-2 pointer-events-auto">
+              {/* Credit counter pill — hidden for admin/unlimited users */}
+              {credits && !isUnlimited && (
+                <div className={cn(
+                  "flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border shadow-lg",
+                  canUseAi
+                    ? "bg-[#0f1420]/90 border-white/10 text-white"
+                    : "bg-rose-950/90 border-rose-500/30 text-rose-400"
+                )}>
+                  {canUseAi
+                    ? <><Zap className="w-3 h-3 text-yellow-400" /> {totalRemaining} left</>
+                    : <><Lock className="w-3 h-3" /> No credits</>
+                  }
+                </div>
+              )}
+              <button
+                onClick={handleOpenBotPopup}
+                className={cn(
+                  "relative w-14 h-14 text-primary-foreground rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all duration-300 cursor-pointer float-right z-10",
+                  // Admin and users with credits: normal indigo | Out-of-credits users: red
+                  isUnlimited || canUseAi
+                    ? "bg-gradient-to-tr from-primary to-primary/80 hover:shadow-primary/25"
+                    : "bg-gradient-to-tr from-rose-700 to-rose-600 hover:shadow-rose-500/25"
+                )}
+              >
+                {isUnlimited || canUseAi ? <BrainCircuit className="w-7 h-7" /> : <Lock className="w-6 h-6" />}
+              </button>
+            </div>
          </div>
       </div>
+
+      {/* AI Payment Modal — never shown for admin users */}
+      {!isUnlimited && (
+        <AiPaymentModal
+          open={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          onSuccess={(creditsAdded) => {
+            setShowPaymentModal(false);
+            fetchCredits();
+            toast({ title: `✅ ${creditsAdded} AI predictions added!`, description: "You can now use the QuantEdge AI bot." });
+          }}
+          freePredictionsUsed={credits?.freePredictionsUsed ?? 0}
+          freePredictionsLimit={credits?.freePredictionsLimit ?? 6}
+          paidCredits={credits?.paidCredits ?? 0}
+        />
+      )}
 
     </AppShell>
   );

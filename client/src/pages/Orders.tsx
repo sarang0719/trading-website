@@ -59,7 +59,7 @@ export default function Orders() {
 
   return (
     <AppShell title="Orders" subtitle="Review your paper order history and manage pending orders.">
-      <Seo title="Orders • Aurum Paper" description="Orders list, cancel workflows." />
+      <Seo title="Orders • HTC Trade" description="Orders list, cancel workflows." />
 
       <div className="glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-luxe">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">

@@ -1,8 +1,8 @@
-# Aurum Paper — Premium Paper Trading Platform
+# HTC Trade — Premium Paper Trading Platform
 
 ## Overview
 
-Aurum Paper is a premium fintech-inspired **paper trading platform** built as a full-stack TypeScript application. It simulates multi-asset trading (stocks, forex, ETFs) with features including watchlists, paper portfolios, order management, market news, educational content, and AI-powered insights via a chat interface. The app targets a Groww/INDmoney-like experience with a dark-first, premium UI aesthetic.
+HTC Trade is a premium fintech-inspired **paper trading platform** built as a full-stack TypeScript application. It simulates multi-asset trading (stocks, forex, ETFs) with features including watchlists, paper portfolios, order management, market news, educational content, and AI-powered insights via a chat interface. The app targets a Groww/INDmoney-like experience with a dark-first, premium UI aesthetic.
 
 This is **not** a real trading platform — all trades are simulated (paper trading). The product focuses on simplicity, trust, and a polished fintech feel.
 

@@ -62,10 +62,8 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const path = await import("path");
-  const { migrate } = await import("drizzle-orm/pglite/migrator");
-  const { db } = await import("./db");
-  await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "migrations") });
+  const { runMigrations } = await import("./db");
+  await runMigrations();
   startBackgroundTasks();
   startAiBotEngine();
 

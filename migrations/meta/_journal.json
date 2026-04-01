@@ -36,6 +36,13 @@
       "when": 1774973827628,
       "tag": "0004_fine_toad",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774975558699,
+      "tag": "0005_aspiring_lyja",
+      "breakpoints": true
     }
   ]
 }

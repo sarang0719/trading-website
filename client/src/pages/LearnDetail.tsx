@@ -36,7 +36,7 @@ export default function LearnDetail() {
       subtitle="A quiet reading space for fundamentals and frameworks."
     >
       <Seo
-        title={`${a?.title ?? "Learn"} • Aurum Paper`}
+        title={`${a?.title ?? "Learn"} • HTC Trade`}
         description={a?.title ? `Learn: ${a.title}` : "Learn article"}
       />
 

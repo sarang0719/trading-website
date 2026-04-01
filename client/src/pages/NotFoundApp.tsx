@@ -6,7 +6,7 @@ import { FileX } from "lucide-react";
 export default function NotFoundApp() {
   return (
     <div className="min-h-screen bg-mesh grain">
-      <Seo title="404 • Aurum Paper" description="Page not found." />
+      <Seo title="404 • HTC Trade" description="Page not found." />
 
       <div className="relative z-10 max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="glass-strong rounded-3xl border border-border/60 p-8 sm:p-10 shadow-luxe text-center">

@@ -9,7 +9,7 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-mesh grain">
       <Seo
-        title="Aurum Paper — Premium paper trading, simplified"
+        title="HTC Trade — Premium paper trading, simplified"
         description="A premium fintech-inspired paper trading MVP: watchlists, paper portfolio, orders, news, and AI insights."
       />
 
@@ -26,7 +26,7 @@ export default function Landing() {
                 <Wallet className="h-5 w-5 text-primary" />
               </div>
               <div className="leading-tight">
-                <div className="text-sm font-semibold tracking-tight">Aurum Paper</div>
+                <div className="text-sm font-semibold tracking-tight">HTC Trade</div>
                 <div className="text-xs text-muted-foreground">Paper trading MVP</div>
               </div>
             </div>
@@ -172,7 +172,7 @@ export default function Landing() {
                   </div>
 
                   <div className="mt-6 rounded-2xl border border-border/60 bg-gradient-to-br from-primary/10 via-background/30 to-accent/10 p-4">
-                    <div className="text-sm font-semibold">Aurum Lens</div>
+                    <div className="text-sm font-semibold">HTC AI</div>
                     <div className="mt-1 text-xs text-muted-foreground">
                       Ask AI for “risk check”, “what moved today?”, or “draft an entry plan”.
                     </div>
@@ -304,7 +304,7 @@ export default function Landing() {
 
         <footer className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-10">
           <div className="text-xs text-muted-foreground/80">
-            © {new Date().getFullYear()} Aurum Paper. For educational purposes only.
+            © {new Date().getFullYear()} HTC Trade. For educational purposes only.
           </div>
         </footer>
       </div>

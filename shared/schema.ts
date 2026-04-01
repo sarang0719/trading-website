@@ -41,6 +41,9 @@ export const users = pgTable(
     profileImageUrl: varchar("profile_image_url"),
     autoTradeEnabled: boolean("auto_trade_enabled"),
     autoTradeAmount: varchar("auto_trade_amount").default("5.00"),
+    // AI Prediction credit system
+    freePredictionsUsed: integer("free_predictions_used").notNull().default(0),
+    paidCredits: integer("paid_credits").notNull().default(0),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -49,6 +52,15 @@ export const users = pgTable(
 
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
+
+// AI Credits response type
+export type AiCreditsResponse = {
+  freePredictionsUsed: number;
+  freePredictionsLimit: number;
+  paidCredits: number;
+  canUse: boolean;
+  isFreeTier: boolean;
+};
 
 // =========================================================
 // TRADING DATA MODEL

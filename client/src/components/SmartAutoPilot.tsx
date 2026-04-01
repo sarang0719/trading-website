@@ -7,6 +7,8 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Bot, Power, PowerOff, Sparkles, Activity, Crosshair } from "lucide-react";
 import { Switch } from "@/components/ui/switch"; 
+import { Input } from "@/components/ui/input";
+import { useState, useEffect } from "react";
 
 function fmtUsd(val: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
@@ -20,17 +22,28 @@ export default function SmartAutoPilot() {
   const queryClient = useQueryClient();
 
   const isEnabled = user?.autoTradeEnabled === true;
+  const dbAmount = user?.autoTradeAmount || "5.00";
+  const [customAmount, setCustomAmount] = useState(dbAmount);
+
+  // Sync state if user data updates from elsewhere
+  useEffect(() => {
+     if (user?.autoTradeAmount) setCustomAmount(user.autoTradeAmount);
+  }, [user?.autoTradeAmount]);
 
   const mutation = useMutation({
-    mutationFn: async (enabled: boolean) => {
-      await apiRequest("POST", "/api/settings/ai-trade", { enabled });
-      return enabled;
+    mutationFn: async (vars: { enabled: boolean, amount?: string }) => {
+      await apiRequest("POST", "/api/settings/ai-trade", vars);
+      return vars;
     },
-    onSuccess: (enabled) => {
-      queryClient.setQueryData(["/api/user"], (old: any) => ({ ...old, autoTradeEnabled: enabled }));
+    onSuccess: (vars) => {
+      queryClient.setQueryData(["/api/user"], (old: any) => ({ 
+         ...old, 
+         autoTradeEnabled: vars.enabled,
+         ...(vars.amount !== undefined ? { autoTradeAmount: vars.amount } : {})
+      }));
       toast({ 
-        title: enabled ? "AI Auto-Pilot Activated" : "AI Auto-Pilot Paused",
-        description: enabled ? "QuantEdge v12.0 is now evaluating the markets." : "Background market scans have been halted."
+        title: vars.enabled ? "AI Auto-Pilot Activated" : "AI Settings Updated",
+        description: vars.enabled ? `QuantEdge v12.0 is actively trading $${vars.amount || customAmount} sizes.` : "Background market scans have been halted."
       });
     },
   });
@@ -83,13 +96,30 @@ export default function SmartAutoPilot() {
             </p>
          </div>
 
-         <div className="flex items-center gap-3 bg-background/50 border border-border/60 p-2 rounded-2xl shadow-sm">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Toggle Bot</span>
-            <Switch 
-               checked={isEnabled} 
-               onCheckedChange={(val) => mutation.mutate(val)} 
-               disabled={mutation.isPending}
-            />
+         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
+             <div className="flex items-center gap-2 bg-background/50 border border-border/60 p-2 rounded-2xl shadow-sm">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground ml-1">Trade Size $</span>
+                <Input 
+                   type="number"
+                   className="h-7 w-20 text-sm bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-center font-bold"
+                   value={customAmount}
+                   onChange={(e) => setCustomAmount(e.target.value)}
+                   onBlur={() => {
+                      if (customAmount !== dbAmount) {
+                         mutation.mutate({ enabled: isEnabled, amount: customAmount });
+                      }
+                   }}
+                />
+             </div>
+             
+             <div className="flex items-center gap-3 bg-background/50 border border-border/60 p-2 rounded-2xl shadow-sm">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Toggle Bot</span>
+                <Switch 
+                   checked={isEnabled} 
+                   onCheckedChange={(val) => mutation.mutate({ enabled: val, amount: customAmount })} 
+                   disabled={mutation.isPending}
+                />
+             </div>
          </div>
        </div>
        

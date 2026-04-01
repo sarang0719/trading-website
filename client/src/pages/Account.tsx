@@ -139,11 +139,6 @@ export default function Account() {
                     <span className="text-sm font-bold opacity-90">To enter the platform</span>
                     <Switch checked={true} onCheckedChange={() => {}} />
                   </div>
-                  
-                  <div className="flex items-center justify-between py-1">
-                    <span className="text-sm font-bold opacity-90">To withdraw funds</span>
-                    <Switch checked={true} onCheckedChange={() => {}} />
-                  </div>
                </div>
 
                <div className="pt-4 space-y-2">

@@ -12,7 +12,7 @@ export default function Settings() {
 
   return (
     <AppShell title="Settings" subtitle="Account, sessions and interface preferences.">
-      <Seo title="Settings • Aurum Paper" description="Account settings and preferences." />
+      <Seo title="Settings • HTC Trade" description="Account settings and preferences." />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-7">
         <section className="glass rounded-3xl border border-border/60 p-5 sm:p-6 shadow-luxe">

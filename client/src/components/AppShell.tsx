@@ -7,17 +7,14 @@ import {
   LayoutDashboard,
   ListChecks,
   Sparkles,
-  Wallet,
+  Briefcase,
   LogOut,
   Zap
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useLocalStorage } from "@/hooks/use-local-storage";
-import { AlertTriangle, Power } from "lucide-react";
 
 type NavItem = {
   href: string;
@@ -30,20 +27,29 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
   const { children, title, subtitle, noPadding } = props;
   const [loc] = useLocation();
   const { user, logout, isLoggingOut } = useAuth();
-  const [isLiveMode, setIsLiveMode] = useLocalStorage("ledgerly_live_mode", false);
+
+
+  const isAdmin = user?.email && ["saran123@gmail.com", "htctrade@gmail.com"].includes(user.email.toLowerCase());
 
   const nav: NavItem[] = useMemo(
-    () => [
-      { href: "/app", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, testId: "nav-dashboard" },
-      { href: "/app/portfolio", label: "Portfolio", icon: <Wallet className="h-4 w-4" />, testId: "nav-portfolio" },
-      { href: "/app/watchlists", label: "Watchlists", icon: <Activity className="h-4 w-4" />, testId: "nav-watchlists" },
-      { href: "/app/markets", label: "Markets", icon: <CandlestickChart className="h-4 w-4" />, testId: "nav-markets" },
-      { href: "/app/orders", label: "Orders", icon: <ListChecks className="h-4 w-4" />, testId: "nav-orders" },
-      { href: "/app/learn", label: "Learn", icon: <BookOpen className="h-4 w-4" />, testId: "nav-learn" },
-      { href: "/app/insights",  label: "AI Insights", icon: <Sparkles className="h-4 w-4" />, testId: "nav-insights" },
-      { href: "/app/strategy",  label: "Strategy",    icon: <Zap      className="h-4 w-4" />, testId: "nav-strategy" },
-    ],
-    [],
+    () => {
+      const allNav = [
+        { href: "/app", label: "Dashboard", icon: <LayoutDashboard className="h-4 w-4" />, testId: "nav-dashboard" },
+        { href: "/app/portfolio", label: "Portfolio", icon: <Briefcase className="h-4 w-4" />, testId: "nav-portfolio" },
+        { href: "/app/watchlists", label: "Watchlists", icon: <Activity className="h-4 w-4" />, testId: "nav-watchlists" },
+        { href: "/app/markets", label: "Markets", icon: <CandlestickChart className="h-4 w-4" />, testId: "nav-markets" },
+        { href: "/app/orders", label: "Orders", icon: <ListChecks className="h-4 w-4" />, testId: "nav-orders" },
+        { href: "/app/learn", label: "Learn", icon: <BookOpen className="h-4 w-4" />, testId: "nav-learn" },
+      ];
+
+      if (isAdmin) {
+        allNav.push({ href: "/app/insights",  label: "AI Insights", icon: <Sparkles className="h-4 w-4" />, testId: "nav-insights" });
+        allNav.push({ href: "/app/strategy",  label: "Strategy",    icon: <Zap      className="h-4 w-4" />, testId: "nav-strategy" });
+      }
+
+      return allNav;
+    },
+    [isAdmin],
   );
 
   return (
@@ -52,7 +58,7 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
       <aside className="hidden lg:flex w-[260px] flex-col border-r border-border/40 bg-card/30 backdrop-blur-xl">
         <div className="p-5 flex items-center gap-3 border-b border-border/40">
           <div className="h-8 w-8 rounded-lg bg-primary shadow-[0_0_15px_rgba(185,95,55,0.4)] grid place-items-center">
-            <Wallet className="h-4 w-4 text-primary-foreground" />
+            <Briefcase className="h-4 w-4 text-primary-foreground" />
           </div>
           <div className="font-bold text-lg tracking-tight">Ledgerly</div>
         </div>
@@ -137,7 +143,7 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
         <header className="h-14 lg:h-16 flex items-center justify-between px-4 lg:px-8 border-b border-border/40 bg-background/80 backdrop-blur-md z-10 shrink-0">
           <div className="flex items-center gap-3">
               <div className="lg:hidden h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 grid place-items-center">
-                 <Wallet className="h-4 w-4 text-primary" />
+                 <Briefcase className="h-4 w-4 text-primary" />
               </div>
               <div className="flex items-center gap-4">
                  <div>
@@ -146,39 +152,11 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
                     </h1>
                     {subtitle && <p className="text-[10px] lg:text-xs text-muted-foreground font-medium hidden sm:block">{subtitle}</p>}
                  </div>
-                 
-                 {/* LIVE MODE BADGE */}
-                 <div className="hidden md:flex ml-2">
-                    {isLiveMode ? (
-                      <div className="bg-[#f23645]/10 text-[#f23645] border border-[#f23645]/20 text-[10px] uppercase font-bold px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-sm shadow-[#f23645]/20 animate-pulse">
-                        <AlertTriangle className="w-3 h-3" />
-                        LIVE TRADING
-                      </div>
-                    ) : (
-                      <div className="bg-[#089981]/10 text-[#089981] border border-[#089981]/20 text-[10px] uppercase font-bold px-2.5 py-1 rounded-md flex items-center gap-1.5 shadow-sm">
-                        <div className="w-1.5 h-1.5 bg-[#089981] rounded-full" />
-                        PAPER TRADING
-                      </div>
-                    )}
-                 </div>
               </div>
            </div>
            
            <div className="flex items-center gap-3">
-             {/* DEMO / LIVE SWITCHER */}
-             <button 
-                onClick={() => setIsLiveMode(!isLiveMode)}
-                className={cn(
-                  "hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-sm",
-                  isLiveMode 
-                    ? "bg-[#f23645]/10 border-[#f23645]/20 text-[#f23645] hover:bg-[#f23645]/20" 
-                    : "bg-secondary/50 border-border/50 text-muted-foreground hover:text-foreground"
-                )}
-             >
-                <Power className="w-3.5 h-3.5" />
-                {isLiveMode ? "Disable Live API" : "Go Live"}
-             </button>
-
+             {/* Symbol search */}
              <div className="relative hidden lg:block ml-2">
                <input type="text" placeholder="Symbol search..." className="bg-secondary/30 border border-border/50 rounded-lg px-3 py-1.5 text-xs font-semibold w-56 focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all" />
                <div className="absolute right-2 top-1.5 text-[9px] font-bold text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border/30">⌘ K</div>
@@ -202,7 +180,7 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
 
       {/* Mobile Bottom Tab Bar */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-card/80 backdrop-blur-xl border-t border-border/60 z-50 px-2 flex justify-around items-center pb-safe">
-        {[nav[0], nav[3], nav[2], nav[4], nav[6]].map((item) => {
+        {[nav[0], nav[3], nav[2], nav[4], nav[6]].filter(Boolean).map((item) => {
           // Select 5 key items for mobile nav: Dashboard, Markets, Watchlists, Orders, Insights
           const active = loc === item.href || (item.href !== "/app" && loc.startsWith(item.href));
           return (

@@ -170,6 +170,132 @@ export async function registerRoutes(
     res.json(news);
   });
 
+  // ──────────────────────────────────────────────
+  // AI PREDICTION CREDITS SYSTEM
+  // ──────────────────────────────────────────────
+  const FREE_LIMIT = 6;
+
+  // Admin emails — unlimited access, no subscription required
+  const ADMIN_EMAILS = new Set([
+    "saran123@gmail.com",
+    "htctrade@gmail.com",
+  ]);
+  const isAdmin = (email?: string | null) => !!email && ADMIN_EMAILS.has(email.toLowerCase());
+
+  app.get("/api/ai/credits", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      // Admins get unlimited access — no credit tracking
+      if (isAdmin(user.email)) {
+        return res.json({
+          freePredictionsUsed: 0,
+          freePredictionsLimit: FREE_LIMIT,
+          paidCredits: 0,
+          canUse: true,
+          isFreeTier: true,
+          isAdmin: true,
+          unlimited: true,
+        });
+      }
+
+      const freePredictionsUsed = user.freePredictionsUsed ?? 0;
+      const paidCredits = user.paidCredits ?? 0;
+      return res.json({
+        freePredictionsUsed,
+        freePredictionsLimit: FREE_LIMIT,
+        paidCredits,
+        canUse: freePredictionsUsed < FREE_LIMIT || paidCredits > 0,
+        isFreeTier: freePredictionsUsed < FREE_LIMIT,
+        isAdmin: false,
+        unlimited: false,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/ai/use-prediction", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      // Admins: unlimited, never deduct
+      if (isAdmin(user.email)) {
+        return res.json({ granted: true, source: "admin", remaining: Infinity });
+      }
+
+      const used = user.freePredictionsUsed ?? 0;
+      const paid = user.paidCredits ?? 0;
+      if (used < FREE_LIMIT) {
+        await storage.updateAiCredits(userId, { freePredictionsUsed: used + 1 });
+        return res.json({ granted: true, source: "free", remaining: FREE_LIMIT - used - 1 });
+      } else if (paid > 0) {
+        await storage.updateAiCredits(userId, { paidCredits: paid - 1 });
+        return res.json({ granted: true, source: "paid", remaining: paid - 1 });
+      } else {
+        return res.status(402).json({ granted: false, message: "No credits remaining. Please purchase a plan." });
+      }
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── RAZORPAY ──
+  const AI_PLANS: Record<string, { credits: number; amountPaise: number; label: string }> = {
+    starter: { credits: 4,  amountPaise: 50000,  label: "₹500 – 4 AI Predictions" },
+    pro:     { credits: 10, amountPaise: 100000, label: "₹1000 – 10 AI Predictions" },
+  };
+
+  app.post("/api/razorpay/create-order", isAuthenticated, async (req: any, res) => {
+    try {
+      const { planId } = z.object({ planId: z.string() }).parse(req.body);
+      const plan = AI_PLANS[planId];
+      if (!plan) return res.status(400).json({ message: "Invalid plan" });
+      const Razorpay = (await import("razorpay")).default;
+      const rzp = new Razorpay({
+        key_id:    process.env.RAZORPAY_KEY_ID    || "rzp_test_placeholder",
+        key_secret: process.env.RAZORPAY_KEY_SECRET || "placeholder_secret",
+      });
+      const order = await rzp.orders.create({
+        amount: plan.amountPaise, currency: "INR",
+        notes: { planId, userId: req.user.claims.sub },
+      });
+      return res.json({ orderId: order.id, amount: plan.amountPaise, currency: "INR",
+        keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
+        planLabel: plan.label, credits: plan.credits });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message || "Failed to create order" });
+    }
+  });
+
+  app.post("/api/razorpay/verify", isAuthenticated, async (req: any, res) => {
+    try {
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId } =
+        z.object({ razorpay_order_id: z.string(), razorpay_payment_id: z.string(),
+          razorpay_signature: z.string(), planId: z.string() }).parse(req.body);
+      const crypto = await import("crypto");
+      const secret = process.env.RAZORPAY_KEY_SECRET || "placeholder_secret";
+      const expected = crypto.createHmac("sha256", secret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+      if (expected !== razorpay_signature)
+        return res.status(400).json({ message: "Payment signature mismatch" });
+      const plan = AI_PLANS[planId];
+      if (!plan) return res.status(400).json({ message: "Invalid plan" });
+      const userId = req.user.claims.sub as string;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      const newPaid = (user.paidCredits ?? 0) + plan.credits;
+      await storage.updateAiCredits(userId, { paidCredits: newPaid });
+      return res.json({ success: true, creditsAdded: plan.credits, totalPaidCredits: newPaid });
+    } catch (err: any) {
+      return res.status(400).json({ message: err.message || "Verification failed" });
+    }
+  });
+
   app.get(api.learn.list.path, async (_req, res) => {
     const learn = await storage.listLearn();
     res.json(learn);

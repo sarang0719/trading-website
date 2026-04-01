@@ -44,7 +44,7 @@ export default function Watchlists() {
 
   return (
     <AppShell title="Watchlists" subtitle="Build focused lists and keep your best setups close.">
-      <Seo title="Watchlists • Aurum Paper" description="Create, browse and manage watchlists." />
+      <Seo title="Watchlists • HTC Trade" description="Create, browse and manage watchlists." />
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
         <div className="glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-luxe">

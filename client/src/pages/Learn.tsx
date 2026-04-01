@@ -26,7 +26,7 @@ export default function Learn() {
 
   return (
     <AppShell title="Learn" subtitle="Concise, high-signal lessons—built like a premium reading experience.">
-      <Seo title="Learn • Aurum Paper" description="Learn articles list." />
+      <Seo title="Learn • HTC Trade" description="Learn articles list." />
 
       <div className="glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-luxe">
         <div className="relative">

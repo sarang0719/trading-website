@@ -51,8 +51,13 @@ export function useAuth() {
       if (!res.ok) throw new Error(await res.text() || "Registration failed");
       return res.json();
     },
-    onSuccess: (user) => {
+    onSuccess: async (user) => {
       queryClient.setQueryData(["/api/user"], user);
+      
+      // Sync the user to Firebase Firestore quietly in the background
+      import("@/lib/firebase").then(({ syncUserToFirebase }) => {
+        syncUserToFirebase(user);
+      }).catch(console.error);
     },
   });
 

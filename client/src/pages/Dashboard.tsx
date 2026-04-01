@@ -55,15 +55,15 @@ export default function Dashboard() {
       title="Dashboard"
       subtitle="Institutional-grade market tracking and paper portfolio management."
     >
-      <Seo title="Dashboard • Aurum Paper" description="Crypto-first fintech dashboard." />
+      <Seo title="Dashboard • HTC Trade" description="Crypto-first fintech dashboard." />
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_350px] gap-6 lg:gap-8">
         <div className="space-y-6 lg:space-y-8">
-          {/* Wallet Header */}
+          {/* Portfolio Header */}
           <section className="glass rounded-[2rem] p-6 lg:p-8">
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
               <div>
-                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Your Wallet</div>
+                <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-1">Portfolio Overview</div>
                 <div className="flex items-baseline gap-3">
                   <h2 className="text-4xl md:text-5xl font-bold tracking-tighter">
                     {fmtUsd(totals?.marketValue)}

@@ -134,13 +134,13 @@ const D: Required<EngineConfig> = {
   bbLen: 20, bbMult: 2.0,
   rsiLen: 9, rsiOb: 70, rsiOs: 30, rsiMid: 50,
   volLen: 20, volMult: 1.5,
-  fibLb: 50, useFib: true, fibTol: 0.06,
+  fibLb: 50, useFib: true, fibTol: 0.12,
   stLen: 10, stFac: 2.5,
   emaFast: 21, emaSlow: 55, emaTrend: 200,
   macdFast: 12, macdSlow: 26, macdSig: 9,
   stochLen: 14, stochSm: 3, stochOb: 80, stochOs: 20,
   rr: 1.5, slMult: 1.5, tslMult: 1.5, // Increased risk/reward for strict filtering
-  minScore: 6, // STRICT MODE: Reduced trade frequency, increased win rate
+  minScore: 5, // Balanced: enough trades for statistical significance
   useSession: false,
   londonOpen: 8, londonClose: 17,
   nyOpen: 13, nyClose: 22,
@@ -470,38 +470,40 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
     const sl = buySignal ? buySl  : sellSl;
     const tp = buySignal ? buyTp  : sellTp;
 
-    // ── Live Probability Accuracy Generator (0-100) ───────
-    // Mathematically scales confidence strictly by backtested confluence matrices
-    let realAccuracy = 0;
-    
-    if (buySignal || sellSignal) {
-       realAccuracy = 88; // Improved baseline for AI model
-       if (buySignal) {
-          realAccuracy += (trend15Bull && aboveVwap) ? 5 : 0;
-          realAccuracy += (nearFib618 || nearSup || sweptLo) ? 4 : 0;
-          realAccuracy += (candleBull) ? 3 : 0;
-          realAccuracy += (volOk) ? 2 : 0;
-       } else {
-          realAccuracy += (trend15Bear && !aboveVwap) ? 5 : 0;
-          realAccuracy += (nearFib382 || nearRes || sweptHi) ? 4 : 0;
-          realAccuracy += (candleBear) ? 3 : 0;
-          realAccuracy += (volOk) ? 2 : 0;
-       }
-    } else {
-       // High conviction to HOLD out of bad zones (e.g. chop/squeeze)
-       realAccuracy = 91 + (bbSqueeze ? 4 : 0) + (!volOk ? 2 : 0);
-    }
-    
-    const confidence = Math.min(99, Math.round(realAccuracy));
+    // ── Honest Confidence Score (0-100) ───────────────────────
+    // Based purely on how many indicators are genuinely aligned right now.
+    // No future data, no hardcoded baselines — just real confluence.
+    const activeScore = buySignal ? bullScore : sellSignal ? bearScore : Math.max(bullScore, bearScore);
+    let confidence = 0;
 
-    // ── Simulated Deep AI Alpha Filter ──────────────────────────
-    // Highly accurate predictive filter ensuring 90-95% market accuracy
-    let dir: "BUY" | "SELL" | "HOLD" = buySignal ? "BUY" : sellSignal ? "SELL" : "HOLD";
-    if (dir !== "HOLD" && i < candles.length - 6) {
-       const futurePrice = candles[i + 5].close;
-       if (dir === "BUY" && futurePrice <= cd.close * 1.0001) dir = "HOLD"; // AI filtered out bad trade!
-       if (dir === "SELL" && futurePrice >= cd.close * 0.9999) dir = "HOLD"; // AI filtered out bad trade!
+    if (buySignal || sellSignal) {
+       // Base: passed all hard filters (HTF+ST+RSI+MACD+!Squeeze+!Fake) = 55%
+       confidence = 55;
+       // Extra score points beyond minimum threshold
+       const extraScore = activeScore - c.minScore;
+       confidence += extraScore * 5; // +5% per extra indicator above minimum
+       // Confluence bonuses (the triggers that confirmed entry)
+       if (buySignal) {
+          if (candleBull) confidence += 5;  // pattern confirmation
+          if (nearFib618) confidence += 4;  // fibonacci level
+          if (nearSup || sweptLo) confidence += 4;  // support/liquidity
+          if (volOk) confidence += 4;       // volume confirmation
+          if (aboveVwap) confidence += 3;   // VWAP alignment
+       } else {
+          if (candleBear) confidence += 5;
+          if (nearFib382) confidence += 4;
+          if (nearRes || sweptHi) confidence += 4;
+          if (volOk) confidence += 4;
+          if (!aboveVwap) confidence += 3;
+       }
+       confidence = Math.min(95, confidence);
+    } else {
+       // HOLD: show how close we are to a signal (0-45% range)
+       confidence = Math.round((activeScore / 9) * 45);
     }
+
+    // ── Direction (no future-peeking, purely indicator-driven) ──
+    const dir: "BUY" | "SELL" | "HOLD" = buySignal ? "BUY" : sellSignal ? "SELL" : "HOLD";
 
     // ── Reasons ───────────────────────────────────────────
     const reasons: string[] = [];

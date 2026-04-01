@@ -67,7 +67,7 @@ export default function AIInsights() {
 
   async function newThread() {
     try {
-      const created = await create.mutateAsync("Aurum Lens");
+      const created = await create.mutateAsync("HTC AI");
       setActiveId(created.id);
       toast({ title: "New thread created", description: "Ask anything about risk, markets, or your plan." });
     } catch (e) {
@@ -122,8 +122,8 @@ export default function AIInsights() {
   }
 
   return (
-    <AppShell title="AI Insights" subtitle="Aurum Lens: streaming answers that stay useful, not verbose.">
-      <Seo title="AI Insights • Aurum Paper" description="Streaming AI chat for market and portfolio insights." />
+    <AppShell title="AI Insights" subtitle="HTC AI: streaming answers that stay useful, not verbose.">
+      <Seo title="AI Insights • HTC Trade" description="Streaming AI chat for market and portfolio insights." />
 
       <div className="space-y-6">
         <SmartAutoPilot />
@@ -331,7 +331,7 @@ export default function AIInsights() {
                           )}
                         >
                           <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                            {isUser ? "You" : "Aurum Lens"}
+                            {isUser ? "You" : "HTC AI"}
                           </div>
                           <div className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">
                             {m.content}
@@ -348,7 +348,7 @@ export default function AIInsights() {
                     <div data-testid="ai-assistant-draft" className="flex justify-start">
                       <div className="max-w-[92%] sm:max-w-[78%] rounded-3xl border border-border/60 bg-background/45 px-4 py-3 shadow-sm">
                         <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                          Aurum Lens (streaming)
+                          HTC AI (streaming)
                         </div>
                         <div className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{assistantDraft}</div>
                         <div className="mt-2 text-[11px] text-muted-foreground">

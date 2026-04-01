@@ -46,7 +46,7 @@ export default function Portfolio() {
 
   return (
     <AppShell title="Portfolio" subtitle="Deep-dive into your asset allocation.">
-      <Seo title="Portfolio • Aurum Paper" />
+      <Seo title="Portfolio • HTC Trade" />
 
       <div className="flex flex-col gap-8">
         {/* TOP LEVEL METRICS */}

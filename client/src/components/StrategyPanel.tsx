@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useInstruments } from "@/hooks/use-instruments";
 import { useTimeTrades } from "@/hooks/use-time-trades";
+import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 
@@ -90,6 +91,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
   const [autoInvest, setAutoInvest] = useState(false);
 
   const { toast } = useToast();
+  const { user } = useAuth();
   const instrumentsQuery = useInstruments();
   const { placeTrade } = useTimeTrades();
   const lastOrderTimeRef = useRef<number | null>(null);
@@ -231,7 +233,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
                  placeTrade.mutate({
                    instrumentId: matchedInst.id,
                    side,
-                   amount: "25.00",
+                   amount: user?.autoTradeAmount || "5.00",
                    strikePrice: String(price),
                    durationSeconds: 60,
                    placedBy: "AI_BOT"
@@ -239,7 +241,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
                    onSuccess: () => {
                      toast({
                        title: "🤖 Auto-Invest Executed!",
-                       description: `${side} 25.00 ${symUpper} Time Trade @ $${price.toFixed(2)}`,
+                       description: `${side} $${user?.autoTradeAmount || "5.00"} ${symUpper} Time Trade @ $${price.toFixed(2)}`,
                      });
                    },
                    onError: (err) => {
@@ -314,7 +316,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
                            placeTrade.mutate({
                              instrumentId: matchedInst.id,
                              side: liveSignal.direction as any,
-                             amount: "5.00",
+                             amount: user?.autoTradeAmount || "5.00",
                              strikePrice: String(liveSignal.entryPrice),
                              durationSeconds: 60,
                              placedBy: "AI_BOT"
@@ -322,7 +324,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
                              onSuccess: () => {
                                toast({
                                  title: "🤖 Live Auto-Invest Executed!",
-                                 description: `${liveSignal.direction} 5.00 ${symUpper} @ $${liveSignal.entryPrice.toFixed(2)} options trade.`,
+                                 description: `${liveSignal.direction} $${user?.autoTradeAmount || "5.00"} ${symUpper} @ $${liveSignal.entryPrice.toFixed(2)} options trade.`,
                                });
                              }
                            });

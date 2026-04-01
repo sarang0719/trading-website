@@ -91,7 +91,7 @@ export default function NewOrder() {
 
   return (
     <AppShell title="New Order" subtitle="A clean ticket for fast paper execution.">
-      <Seo title="New Order • Aurum Paper" description="Create a new paper trading order." />
+      <Seo title="New Order • HTC Trade" description="Create a new paper trading order." />
 
       <div className="mb-4">
         <Link
