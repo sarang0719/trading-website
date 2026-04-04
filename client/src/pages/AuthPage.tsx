@@ -2,15 +2,16 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { Wallet, Sparkles } from "lucide-react";
+import { Wallet, Sparkles, Chrome } from "lucide-react";
 import Seo from "@/components/Seo";
 import ThemeToggle from "@/components/ThemeToggle";
-
+import { auth, googleProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 export default function AuthPage() {
   const [, setLocation] = useLocation();
-  const { login, register, isLoading } = useAuth();
+  const { login, register, loginWithFirebase, isFirebaseWorking, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
 
   // Form states
@@ -19,31 +20,92 @@ export default function AuthPage() {
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [isFirebaseLoading, setIsFirebaseLoading] = useState(false);
+
+  const isLoading = authLoading || isFirebaseLoading || isFirebaseWorking;
+
+  const handleGoogleLogin = async () => {
+    try {
+      setIsFirebaseLoading(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      const idToken = await result.user.getIdToken();
+      await loginWithFirebase({ idToken });
+      setLocation("/app");
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Google Login Failed",
+        description: err.message || "Failed to sign in with Google.",
+      });
+    } finally {
+      setIsFirebaseLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (isLogin) {
-        const res = await login({ email, password });
-        if (res.ok) setLocation("/app");
-      } else {
-        const res = await register({ email, password, firstName, lastName });
-        if (res.ok) {
-          toast({
-            title: "Welcome!",
-            description: "Account created successfully.",
-          });
-          setLocation("/app");
+      setIsFirebaseLoading(true);
+      
+      // Smart Fallback: Check if Firebase is actually configured
+      const isFirebaseConfigured = !(window as any).__FIREBASE_DISABLED__;
+
+      if (!isFirebaseConfigured) {
+        if (isLogin) {
+          await login({ email, password });
+        } else {
+          await register({ email, password, firstName, lastName });
         }
+        setLocation("/app");
+        return;
       }
+
+      let idToken: string;
+      if (isLogin) {
+        // Firebase Sign In
+        const result = await signInWithEmailAndPassword(auth, email, password);
+        idToken = await result.user.getIdToken();
+      } else {
+        // Firebase Sign Up
+        const result = await createUserWithEmailAndPassword(auth, email, password);
+        idToken = await result.user.getIdToken();
+      }
+
+      // Exchange Firebase token for local session
+      await loginWithFirebase(
+        isLogin 
+          ? { idToken } 
+          : { idToken, firstName, lastName }
+      );
+      
+      if (!isLogin) {
+        toast({ title: "Welcome!", description: "Cloud account created successfully." });
+      }
+      setLocation("/app");
     } catch (err: any) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: err.message || "Authentication failed. Please check your credentials.",
+        title: "Authentication Error",
+        description: err.message || "Could not verify your identity. Please try again.",
       });
+    } finally {
+      setIsFirebaseLoading(false);
     }
   };
+
+  const handleGoogleFallback = () => {
+    const isFirebaseConfigured = !(window as any).__FIREBASE_DISABLED__;
+    if (!isFirebaseConfigured) {
+      toast({
+         title: "Firebase Required",
+         description: "Google Login requires a valid Firebase configuration in lib/firebase.ts",
+         variant: "destructive"
+      });
+      return;
+    }
+    handleGoogleLogin();
+  };
+
 
   return (
     <div className="min-h-screen bg-mesh grain flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -129,6 +191,22 @@ export default function AuthPage() {
             </div>
           </form>
 
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border/40"></span></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-background/90 px-2 text-muted-foreground font-bold">Or continue with</span></div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+             <Button 
+                variant="outline" 
+                onClick={handleGoogleFallback} 
+                disabled={isLoading}
+                className="rounded-xl py-5 border-border/60 hover:bg-primary/5 transition-all flex items-center justify-center gap-2"
+             >
+                <Chrome className="h-4 w-4" /> Google Secure Login
+             </Button>
+          </div>
+
           <div className="mt-6 text-center">
             <button
               onClick={() => {
@@ -146,8 +224,9 @@ export default function AuthPage() {
           </div>
 
           <div className="mt-8 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground/80 font-medium">
-                  <Sparkles className="h-3.5 w-3.5 text-primary" /> Secure Local Auth
+              <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground/80 font-bold uppercase tracking-tighter">
+                  <span className={cn("w-2 h-2 rounded-full", (window as any).__FIREBASE_DISABLED__ ? "bg-primary" : "bg-emerald-500 animate-pulse")} />
+                  {(window as any).__FIREBASE_DISABLED__ ? "Institutional Local Engine" : "Firebase Cloud Secured"}
               </span>
               <ThemeToggle />
           </div>

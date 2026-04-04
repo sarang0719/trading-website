@@ -247,6 +247,14 @@ export async function registerRoutes(
     } catch (e: any) { return res.status(500).json({ message: e.message }); }
   });
 
+  app.post("/api/user/commission-agreement", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const updated = await storage.updateUser(userId, { commissionAgreed: true });
+      return res.json({ commissionAgreed: updated.commissionAgreed });
+    } catch (e: any) { return res.status(500).json({ message: e.message }); }
+  });
+
   app.post("/api/wallet/withdraw", isAuthenticated, async (req: any, res) => {
     try {
       const { amount } = z.object({ amount: z.number().min(10) }).parse(req.body);
@@ -404,6 +412,10 @@ export async function registerRoutes(
       const userId = req.user.claims.sub as string;
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
+      if (user.isAIBlocked) return res.status(403).json({ 
+        granted: false, 
+        message: "AI prediction services are currently restricted for your account. Contact support." 
+      });
 
       // Admins: unlimited, never deduct
       if (isAdmin(user.email)) {
@@ -500,6 +512,181 @@ export async function registerRoutes(
       return res.status(400).json({ message: err.message || "Invalid request" });
     }
   });
+
+  app.patch("/api/user/settings", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const { phoneNumber } = z.object({ phoneNumber: z.string().max(20) }).parse(req.body);
+      const userId = (req.user as any).id || (req.user as any).claims?.sub;
+      const updated = await storage.updateUser(userId, { phoneNumber });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  // --- WITHDRAWAL ROUTES ---
+  app.post("/api/wallet/withdraw", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    try {
+      const { amount, method, details } = z.object({
+        amount: z.string(),
+        method: z.string(),
+        details: z.string(),
+      }).parse(req.body);
+
+      const userId = (req.user as any).id || (req.user as any).claims?.sub;
+      const amountVal = parseFloat(amount);
+
+      const walletInfo = await storage.getWalletInfo(userId);
+
+      if (!walletInfo || parseFloat(walletInfo.realBalance) < amountVal) {
+        return res.status(400).json({ message: "Insufficient balance for withdrawal" });
+      }
+
+      // Deduct balance immediately and create a pending request
+      // We deduct now to "freeze" the funds. If rejected, we refund.
+      await storage.updateWalletBalance(userId, -amountVal);
+      
+      const request = await storage.createWithdrawalRequest({
+        userId,
+        amount,
+        method,
+        details,
+        status: "PENDING"
+      });
+
+      await storage.createWalletTransaction({
+        userId,
+        type: "WITHDRAW",
+        amount: String(-amountVal),
+        status: "PENDING",
+        mode: "REAL",
+        referenceId: `WD-${request.id}`
+      } as any);
+
+      await storage.logActivity(userId, "WITHDRAWAL_REQUEST", `Requested ₹${amount} via ${method}`);
+      res.json(request);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
+  app.get("/api/wallet/withdrawals", async (req, res) => {
+    if (!req.isAuthenticated()) return res.sendStatus(401);
+    const userId = (req.user as any).id || (req.user as any).claims?.sub;
+    const list = await storage.getUserWithdrawalRequests(userId);
+    res.json(list);
+  });
+
+
+  // ── ADMIN CONTROL CENTER ──
+  const checkAdmin = (req: any, res: any, next: any) => {
+    if (req.isAuthenticated() && (req.user as any).email === "saran123@gmail.com") {
+      return next();
+    }
+    return res.status(403).json({ message: "Access Denied: Admin privileges required." });
+  };
+
+  // 1. List all users with basic info
+  app.get("/api/admin/users", checkAdmin, async (_req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      res.json(users);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // 2. Comprehensive User Profile / Monitoring
+  app.get("/api/admin/users/:id/monitoring", checkAdmin, async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const loginHistory = await storage.getLoginHistory(userId);
+      const activities = await storage.getUserActivities(userId);
+      
+      // Also get their orders/trades
+      const orders = await storage.listOrders(userId); 
+      const timeTrades = await storage.listTimeBasedOrders(userId);
+      const transactions = await storage.getWalletTransactions(userId);
+
+      res.json({
+        user,
+        loginHistory,
+        activities,
+        trades: {
+          standard: orders,
+          timeBased: timeTrades
+        },
+        transactions,
+      });
+    } catch (err: any) {
+       res.status(500).json({ message: err.message });
+    }
+  });
+
+  // 3. User Control: Block / Unblock / Restrict AI
+  app.patch("/api/admin/users/:id/control", checkAdmin, async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const { isBlocked, isAIBlocked } = z.object({
+        isBlocked: z.boolean().optional(),
+        isAIBlocked: z.boolean().optional(),
+      }).parse(req.body);
+
+      const updated = await storage.updateUserAdminFlags(userId, { isBlocked, isAIBlocked });
+      
+      // Log the change as an activity
+      if (isBlocked !== undefined) {
+         await storage.logActivity(userId, isBlocked ? "BLOCKED" : "UNBLOCKED", "Status changed by administrator");
+      }
+      if (isAIBlocked !== undefined) {
+         await storage.logActivity(userId, isAIBlocked ? "AI_RESTRICTED" : "AI_ENABLED", "AI access changed by administrator");
+      }
+
+      res.json(updated);
+    } catch (err: any) {
+       res.status(400).json({ message: err.message });
+    }
+  });
+
+  // 4. Withdrawal Management
+  app.get("/api/admin/withdrawals", checkAdmin, async (_req, res) => {
+    try {
+      const list = await storage.getAllWithdrawalRequests();
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/admin/withdrawals/:id/status", checkAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status, adminNotes } = z.object({
+        status: z.enum(["APPROVED", "REJECTED", "CANCELLED"]),
+        adminNotes: z.string().optional()
+      }).parse(req.body);
+
+      const currentReq = (await storage.getAllWithdrawalRequests()).find(r => r.id === id);
+      if (!currentReq) return res.status(404).json({ message: "Request not found" });
+
+      if (status === "REJECTED" && currentReq.status === "PENDING") {
+        // Refund the amount if rejected
+        await storage.updateWalletBalance(currentReq.userId, parseFloat(currentReq.amount));
+        await storage.logActivity(currentReq.userId, "WITHDRAWAL_REJECTED", `Refunded ₹${currentReq.amount} due to rejection`);
+      }
+
+      const updated = await storage.updateWithdrawalStatus(id, status, adminNotes);
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ message: err.message });
+    }
+  });
+
 
   return httpServer;
 }

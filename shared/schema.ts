@@ -17,6 +17,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export const tradeModeEnum = pgEnum("trade_mode", ["DEMO", "REAL"]);
+export const withdrawalStatusEnum = pgEnum("withdrawal_status", ["PENDING", "APPROVED", "REJECTED", "CANCELLED"]);
 
 // =========================================================
 // AUTH (Replit Auth required tables)
@@ -52,7 +53,16 @@ export const users = pgTable(
     walletBalance: numeric("wallet_balance", { precision: 18, scale: 2 }).notNull().default("0.00"),
     demoBalance: numeric("demo_balance", { precision: 18, scale: 2 }).notNull().default("10000.00"),
     tradeMode: tradeModeEnum("trade_mode").notNull().default("DEMO"),
+    
+    // Notifications & SMS
+    phoneNumber: varchar("phone_number", { length: 20 }),
 
+    // Admin Control Flags
+    isBlocked: boolean("is_blocked").notNull().default(false),
+    isAIBlocked: boolean("is_ai_blocked").notNull().default(false),
+    autoInvestRound: integer("auto_invest_round").notNull().default(1),
+    autoInvestRoundPnl: numeric("auto_invest_round_pnl", { precision: 18, scale: 2 }).notNull().default("0.00"),
+    commissionAgreed: boolean("commission_agreed").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -115,10 +125,12 @@ export const latestPrices = pgTable(
     price: numeric("price", { precision: 18, scale: 6 }).notNull(),
     changeAbs: numeric("change_abs", { precision: 18, scale: 6 }),
     changePct: numeric("change_pct", { precision: 9, scale: 4 }),
+    isOpen: boolean("is_open").notNull().default(true),
     sparkline: numeric("sparkline", { precision: 18, scale: 6 }).array(),
   },
   (t) => [uniqueIndex("latest_prices_instrument_unique").on(t.instrumentId)],
 );
+
 
 export const watchlists = pgTable(
   "watchlists",
@@ -330,7 +342,7 @@ export type LearnDetailResponse = LearnArticle;
 // WALLET AND TRANSACTIONS MODEL
 // =========================================================
 
-export const transactionTypeEnum = pgEnum("transaction_type", ["DEPOSIT", "WITHDRAW", "TRADE_DEDUCTION", "TRADE_WIN", "DEMO_RESET"]);
+export const transactionTypeEnum = pgEnum("transaction_type", ["DEPOSIT", "WITHDRAW", "TRADE_DEDUCTION", "TRADE_WIN", "TRADE_REFUND", "DEMO_RESET", "COMMISSION"]);
 export const transactionStatusEnum = pgEnum("transaction_status", ["PENDING", "SUCCESS", "FAILED"]);
 
 export const walletTransactions = pgTable("wallet_transactions", {
@@ -353,3 +365,43 @@ export type WalletInfoResponse = {
   demoBalance: string;
   tradeMode: "DEMO" | "REAL";
 };
+
+// --- ADMIN TRACKING TABLES ---
+
+export const loginHistory = pgTable("login_history", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  ip: varchar("ip", { length: 45 }),
+  device: varchar("device", { length: 255 }),
+  browser: varchar("browser", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const userActivities = pgTable("user_activities", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  action: varchar("action", { length: 255 }).notNull(), // e.g., "LOGIN", "TRADE_PLACE", "AI_PREDICTION", "DEPOSIT"
+  details: text("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type LoginHistory = typeof loginHistory.$inferSelect;
+export type InsertLoginHistory = typeof loginHistory.$inferInsert;
+
+export type UserActivity = typeof userActivities.$inferSelect;
+export type InsertUserActivity = typeof userActivities.$inferInsert;
+
+export const withdrawalRequests = pgTable("withdrawal_requests", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  method: varchar("method", { length: 50 }).notNull(), // UPI, BANK
+  details: text("details").notNull(), 
+  status: withdrawalStatusEnum("status").notNull().default("PENDING"),
+  adminNotes: text("admin_notes"),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;
+export type InsertWithdrawalRequest = typeof withdrawalRequests.$inferInsert;

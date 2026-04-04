@@ -16,4 +16,23 @@ if (!admin.apps.length) {
 }
 
 export const firebaseAdmin = admin;
+export const firestore = admin.apps.length ? admin.firestore() : null;
+
+/**
+ * Mirror local user data to Cloud Firestore for permanent visibility
+ */
+export async function syncUserToFirestore(localUser: any) {
+  if (!firestore) return;
+  try {
+     const docRef = firestore.collection("users").doc(localUser.id);
+     await docRef.set({
+       ...localUser,
+       lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+     }, { merge: true });
+     console.log(`[Firestore Sync] User ${localUser.email} archived to cloud`);
+  } catch (error) {
+     console.error("[Firestore Sync] Failed to mirror user to cloud:", error);
+  }
+}
+
 export default admin;

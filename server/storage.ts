@@ -1,5 +1,6 @@
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "./db";
+import { syncUserToFirestore } from "./firebase-admin";
 import {
   holdings,
   instruments,
@@ -13,6 +14,9 @@ import {
   learnArticles,
   users,
   walletTransactions,
+  loginHistory,
+  userActivities,
+  withdrawalRequests,
   type CreateOrderRequest,
   type CreatePortfolioRequest,
   type CreateWatchlistItemRequest,
@@ -35,6 +39,12 @@ import {
   type UpsertUser,
   type WalletTransaction,
   type InsertWalletTransaction,
+  type LoginHistory,
+  type InsertLoginHistory,
+  type UserActivity,
+  type InsertUserActivity,
+  type WithdrawalRequest,
+  type InsertWithdrawalRequest,
 } from "@shared/schema";
 
 function num(v: any): number {
@@ -46,9 +56,19 @@ function num(v: any): number {
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByFirebaseUid(uid: string): Promise<User | undefined>;
   createUser(user: UpsertUser): Promise<User>;
   updateAiTradeConsent(userId: string, enabled?: boolean, amount?: string): Promise<void>;
   updateAiCredits(userId: string, update: { freePredictionsUsed?: number; paidCredits?: number }): Promise<void>;
+  updateUser(id: string, payload: Partial<User>): Promise<User>;
+
+  // Admin Dashboard System
+  getAllUsers(): Promise<User[]>;
+  getLoginHistory(userId: string): Promise<LoginHistory[]>;
+  getUserActivities(userId: string): Promise<UserActivity[]>;
+  logLogin(userId: string, data: { ip?: string; device?: string; browser?: string }): Promise<void>;
+  logActivity(userId: string, action: string, details?: string): Promise<void>;
+  updateUserAdminFlags(userId: string, flags: { isBlocked?: boolean; isAIBlocked?: boolean }): Promise<User>;
   
   // Wallet System
   updateWalletBalance(userId: string, amountOffset: number): Promise<User>;
@@ -56,8 +76,14 @@ export interface IStorage {
   setTradeMode(userId: string, mode: "DEMO" | "REAL"): Promise<User>;
   resetDemoBalance(userId: string): Promise<User>;
   getWalletInfo(userId: string): Promise<{ realBalance: string; demoBalance: string; tradeMode: string } | null>;
-  createWalletTransaction(tx: InsertWalletTransaction): Promise<WalletTransaction>;
   getWalletTransactions(userId: string): Promise<WalletTransaction[]>;
+
+  // Withdrawal System
+  createWithdrawalRequest(req: InsertWithdrawalRequest): Promise<WithdrawalRequest>;
+  getUserWithdrawalRequests(userId: string): Promise<WithdrawalRequest[]>;
+  getAllWithdrawalRequests(): Promise<(WithdrawalRequest & { user: User })[]>;
+  updateWithdrawalStatus(withdrawalId: number, status: any, notes?: string): Promise<WithdrawalRequest>;
+
 
   listInstruments(input?: {
     q?: string;
@@ -104,10 +130,61 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async createUser(insertUser: UpsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
+  async getUserByFirebaseUid(uid: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.firebaseUid, uid));
     return user;
   }
+
+  async createUser(insertUser: UpsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    if (user) await syncUserToFirestore(user);
+    return user;
+  }
+
+  async updateUser(id: string, payload: Partial<User>): Promise<User> {
+    const [user] = await db.update(users).set(payload).where(eq(users.id, id)).returning();
+    if (!user) throw new Error("User not found for update");
+    await syncUserToFirestore(user);
+    return user;
+  }
+
+  // Admin Dashboard System
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async getLoginHistory(userId: string): Promise<LoginHistory[]> {
+    return await db.select().from(loginHistory).where(eq(loginHistory.userId, userId)).orderBy(desc(loginHistory.createdAt));
+  }
+
+  async getUserActivities(userId: string): Promise<UserActivity[]> {
+    return await db.select().from(userActivities).where(eq(userActivities.userId, userId)).orderBy(desc(userActivities.createdAt));
+  }
+
+  async logLogin(userId: string, data: { ip?: string; device?: string; browser?: string }): Promise<void> {
+    await db.insert(loginHistory).values({
+      userId,
+      ip: data.ip,
+      device: data.device,
+      browser: data.browser,
+    });
+  }
+
+  async logActivity(userId: string, action: string, details?: string): Promise<void> {
+    await db.insert(userActivities).values({
+      userId,
+      action,
+      details,
+    });
+  }
+
+  async updateUserAdminFlags(userId: string, flags: { isBlocked?: boolean; isAIBlocked?: boolean }): Promise<User> {
+    const [user] = await db.update(users).set(flags).where(eq(users.id, userId)).returning();
+    if (!user) throw new Error("User not found");
+    await syncUserToFirestore(user);
+    return user;
+  }
+
 
   async updateAiTradeConsent(userId: string, enabled?: boolean, amount?: string): Promise<void> {
     const payload: Partial<User> = {};
@@ -127,10 +204,46 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // Withdrawal System
+  async updateWithdrawalStatus(reqId: number, status: any, notes?: string): Promise<WithdrawalRequest> {
+    const [req] = await db.update(withdrawalRequests)
+      .set({ status, adminNotes: notes, processedAt: new Date() })
+      .where(eq(withdrawalRequests.id, reqId))
+      .returning();
+    if (!req) throw new Error("Withdrawal request not found");
+    return req;
+  }
+
+  async getAllWithdrawalRequests(): Promise<(WithdrawalRequest & { user: User })[]> {
+    const results = await db.select({
+      request: withdrawalRequests,
+      user: users
+    })
+    .from(withdrawalRequests)
+    .innerJoin(users, eq(withdrawalRequests.userId, users.id))
+    .orderBy(desc(withdrawalRequests.createdAt));
+
+    return results.map(r => ({
+      ...r.request,
+      user: r.user
+    }));
+  }
+
+  async getUserWithdrawalRequests(userId: string): Promise<WithdrawalRequest[]> {
+     return await db.select().from(withdrawalRequests).where(eq(withdrawalRequests.userId, userId)).orderBy(desc(withdrawalRequests.createdAt));
+  }
+
+  async createWithdrawalRequest(insertReq: InsertWithdrawalRequest): Promise<WithdrawalRequest> {
+     const [req] = await db.insert(withdrawalRequests).values(insertReq).returning();
+     return req;
+  }
+
+
   async updateWalletBalance(userId: string, amountOffset: number): Promise<User> {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const newBalance = (parseFloat(user.walletBalance as string) || 0) + amountOffset;
     const [updated] = await db.update(users).set({ walletBalance: newBalance.toFixed(2) }).where(eq(users.id, userId)).returning();
+    await syncUserToFirestore(updated);
     return updated;
   }
 
@@ -138,6 +251,7 @@ export class DatabaseStorage implements IStorage {
     const [user] = await db.select().from(users).where(eq(users.id, userId));
     const newBalance = Math.max(0, (parseFloat(user.demoBalance as string) || 0) + amountOffset);
     const [updated] = await db.update(users).set({ demoBalance: newBalance.toFixed(2) }).where(eq(users.id, userId)).returning();
+    await syncUserToFirestore(updated);
     return updated;
   }
 
@@ -543,6 +657,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seed(): Promise<void> {
+    // Remove outdated PAXG trackers to keep the platform professional
+    await db.delete(instruments).where(or(eq(instruments.symbol, "PAXGUSDT"), eq(instruments.symbol, "PAXG/USDT")));
+
     const seededInstruments: Omit<Instrument, "id">[] = [
       // Top Cryptos mapped exactly to Binance websocket identifiers
       { symbol: "BTCUSDT",  exchange: "BINANCE", name: "Bitcoin",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/btc@2x.png" },
@@ -581,11 +698,10 @@ export class DatabaseStorage implements IStorage {
       { symbol: "ALGOUSDT", exchange: "BINANCE", name: "Algorand",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/algo@2x.png" },
       { symbol: "FTMUSDT",  exchange: "BINANCE", name: "Fantom",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ftm@2x.png" },
       
-      // Keep ONE commodity tracker available on Binance
-      { symbol: "PAXGUSDT", exchange: "BINANCE", name: "Gold (PAXG)", assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/paxg@2x.png" },
-
       // Newly Requested Pairs
       // Forex
+      { symbol: "XAUUSD", exchange: "FOREX", name: "Gold (Spot)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "XAGUSD", exchange: "FOREX", name: "Silver (Spot)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "USDPKR", exchange: "FOREX", name: "US Dollar vs Pakistani Rupee", assetClass: "FOREX" as any, currency: "USD", country: "PK", isActive: true, imageUrl: null },
       { symbol: "USDINR", exchange: "FOREX", name: "US Dollar vs Indian Rupee", assetClass: "FOREX" as any, currency: "USD", country: "IN", isActive: true, imageUrl: null },
       { symbol: "CADCHF", exchange: "FOREX", name: "Canadian Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CAD", country: "CH", isActive: true, imageUrl: null },
@@ -596,11 +712,6 @@ export class DatabaseStorage implements IStorage {
       { symbol: "USDCHF", exchange: "FOREX", name: "US Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "EURJPY", exchange: "FOREX", name: "Euro vs Yen", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
 
-      // Commodities
-      { symbol: "XAUUSD", exchange: "COMMODITY", name: "Gold", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "XAGUSD", exchange: "COMMODITY", name: "Silver", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "WTIUSD", exchange: "COMMODITY", name: "WTI Crude Oil", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "BRENTUSD", exchange: "COMMODITY", name: "Brent Crude", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
 
       // Stocks
       { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },

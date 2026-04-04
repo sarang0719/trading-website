@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
 import MemoryStore from "memorystore";
+import { firebaseAdmin } from "./firebase-admin";
 
 const scryptAsync = promisify(scrypt);
 
@@ -53,6 +54,9 @@ export async function setupAuth(app: Express) {
         if (!user || !(await comparePasswords(password, user.password!))) {
           return done(null, false, { message: "Invalid email or password" });
         }
+        if (user.isBlocked) {
+          return done(null, false, { message: "This account has been blocked by an administrator" });
+        }
         return done(null, user);
       } catch (err) {
         return done(err);
@@ -67,7 +71,7 @@ export async function setupAuth(app: Express) {
   passport.deserializeUser(async (id: string, done) => {
     try {
       const user = await storage.getUser(id);
-      if (!user) {
+      if (!user || user.isBlocked) {
         return done(null, false);
       }
       done(null, user);
@@ -115,8 +119,19 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  app.post("/api/login", passport.authenticate("local"), (req, res) => {
+  app.post("/api/login", passport.authenticate("local"), async (req, res) => {
     const u: any = req.user;
+    
+    // Log Activity
+    const ua = req.headers["user-agent"];
+    const browser = req.headers["sec-ch-ua"];
+    await storage.logLogin(u.id, {
+      ip: req.ip,
+      device: Array.isArray(ua) ? ua[0] : ua || "unknown",
+      browser: Array.isArray(browser) ? browser[0] : browser || "standard browser"
+    });
+    await storage.logActivity(u.id, "LOGIN", "Basic email/password login");
+
     res.status(200).json({
       id: u.id,
       email: u.email,
@@ -133,6 +148,76 @@ export async function setupAuth(app: Express) {
       if (err) return next(err);
       res.sendStatus(200);
     });
+  });
+
+  // Firebase Authentication Bridge
+  app.post("/api/auth/firebase", async (req, res, next) => {
+    try {
+      const { idToken, firstName, lastName } = req.body;
+      if (!idToken) return res.status(400).json({ message: "ID Token is required" });
+
+      // 1. Verify token with Firebase Admin
+      const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
+      const { uid, email, name, picture } = decodedToken;
+
+      // 2. Check if user exists in local DB by Firebase UID
+      let user = await storage.getUserByFirebaseUid(uid);
+      
+      // 3. Auto-register if not exists
+      if (!user) {
+        // Fallback: check if exists by email to link legacy accounts
+        const existingByEmail = email ? await storage.getUserByUsername(email) : null;
+        if (existingByEmail) {
+           await storage.updateUser(existingByEmail.id, { 
+             firebaseUid: uid,
+             firstName: existingByEmail.firstName || firstName || name?.split(" ")[0],
+             lastName: existingByEmail.lastName || lastName || name?.split(" ").slice(1).join(" "),
+             profileImageUrl: existingByEmail.profileImageUrl || picture || ""
+           });
+           user = await storage.getUser(existingByEmail.id);
+        } else {
+           user = await storage.createUser({
+             email: email || `${uid}@firebase.local`,
+             firstName: firstName || name?.split(" ")[0] || "User",
+             lastName: lastName || name?.split(" ").slice(1).join(" ") || "",
+             profileImageUrl: picture || "",
+             firebaseUid: uid,
+           });
+           console.log(`[Firebase Auth] New user registered: ${email}`);
+        }
+      }
+
+      // 4. Log in into session
+      if (!user) throw new Error("Could not create local user record");
+      if (user.isBlocked) return res.status(403).json({ message: "This account has been blocked by an administrator" });
+
+      req.login(user, async (err) => {
+        if (err) return next(err);
+
+        // Log Activity
+        const ua = req.headers["user-agent"];
+        const browser = req.headers["sec-ch-ua"];
+        await storage.logLogin(user.id, {
+          ip: req.ip,
+          device: Array.isArray(ua) ? ua[0] : ua || "unknown",
+          browser: Array.isArray(browser) ? browser[0] : browser || "standard browser"
+        });
+        await storage.logActivity(user.id, "LOGIN", "Cloud authentication (Firebase)");
+
+        res.json({
+          id: user!.id,
+          email: user!.email,
+          firstName: user!.firstName,
+          profileImageUrl: user!.profileImageUrl,
+          walletBalance: user!.walletBalance,
+          demoBalance: user!.demoBalance,
+          tradeMode: user!.tradeMode,
+        });
+      });
+    } catch (error: any) {
+      console.error("[Firebase Auth] Verification failed:", error.message);
+      res.status(401).json({ message: "Invalid Firebase token" });
+    }
   });
 
   app.get("/api/user", (req, res) => {

@@ -98,6 +98,7 @@ export default function Markets() {
 
   // Connect WebSockets for Real-World Markets (Binance & TwelveData)
   useEffect(() => {
+    let isActive = true;
     let wsBinance: WebSocket;
     let wsTwelve: WebSocket;
 
@@ -108,6 +109,7 @@ export default function Markets() {
         try {
           wsBinance = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
           wsBinance.onmessage = (event) => {
+            if (!isActive) return;
             try {
               const msg = JSON.parse(event.data);
               if (Array.isArray(msg)) {
@@ -140,7 +142,7 @@ export default function Markets() {
       }
 
       // 2. TwelveData Real-World non-Crypto WebSocket
-      const tdInsts = instruments.data.filter((i: any) => i.exchange !== "BINANCE" && i.exchange !== "OTC");
+      const tdInsts = instruments.data.filter((i: any) => i.exchange !== "BINANCE");
       if (tdInsts.length > 0) {
         const symbolsList = tdInsts.map((i: any) => {
            let sym = i.symbol;
@@ -156,6 +158,7 @@ export default function Markets() {
               wsTwelve.send(JSON.stringify({ "action": "subscribe", "params": { "symbols": symbolsList } }));
            };
            wsTwelve.onmessage = (event) => {
+              if (!isActive) return;
               try {
                 const data = JSON.parse(event.data);
                 if (data.event === "price" && data.symbol) {
@@ -187,8 +190,20 @@ export default function Markets() {
     }
 
     return () => {
-      if (wsBinance) wsBinance.close();
-      if (wsTwelve) wsTwelve.close();
+      isActive = false;
+      if (wsBinance) {
+        wsBinance.onmessage = null;
+        wsBinance.onclose = null;
+        wsBinance.onerror = null;
+        try { wsBinance.close(); } catch {}
+      }
+      if (wsTwelve) {
+        wsTwelve.onmessage = null;
+        wsTwelve.onclose = null;
+        wsTwelve.onopen = null;
+        wsTwelve.onerror = null;
+        try { wsTwelve.close(); } catch {}
+      }
     };
   }, [instruments.data]);
 

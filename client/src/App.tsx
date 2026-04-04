@@ -22,6 +22,7 @@ import Settings from "@/pages/Settings";
 import NotFoundApp from "@/pages/NotFoundApp";
 import Strategy from "@/pages/Strategy";
 import Account from "@/pages/Account";
+import AdminDashboard from "@/pages/AdminDashboard";
 
 function Router() {
   return (
@@ -45,6 +46,7 @@ function Router() {
       <Route path="/app/settings" component={Settings} />
       <Route path="/app/strategy" component={Strategy} />
       <Route path="/app/account" component={Account} />
+      <Route path="/app/admin" component={AdminDashboard} />
 
       {/* Nice 404 for app routes */}
       <Route path="/app/:rest*" component={NotFoundApp as any} />

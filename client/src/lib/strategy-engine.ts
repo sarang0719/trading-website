@@ -140,7 +140,7 @@ const D: Required<EngineConfig> = {
   macdFast: 12, macdSlow: 26, macdSig: 9,
   stochLen: 14, stochSm: 3, stochOb: 80, stochOs: 20,
   rr: 1.5, slMult: 1.5, tslMult: 1.5, // Increased risk/reward for strict filtering
-  minScore: 5, // Balanced: enough trades for statistical significance
+  minScore: 6, // Institutional Grade: Higher threshold for maximum accuracy
   useSession: false,
   londonOpen: 8, londonClose: 17,
   nyOpen: 13, nyClose: 22,

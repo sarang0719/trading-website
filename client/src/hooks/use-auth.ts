@@ -51,13 +51,23 @@ export function useAuth() {
       if (!res.ok) throw new Error(await res.text() || "Registration failed");
       return res.json();
     },
-    onSuccess: async (user) => {
+    onSuccess: (user) => {
       queryClient.setQueryData(["/api/user"], user);
-      
-      // Sync the user to Firebase Firestore quietly in the background
-      import("@/lib/firebase").then(({ syncUserToFirebase }) => {
-        syncUserToFirebase(user);
-      }).catch(console.error);
+    },
+  });
+
+  const firebaseLoginMutation = useMutation({
+    mutationFn: async (args: { idToken: string; firstName?: string; lastName?: string }) => {
+      const res = await fetch("/api/auth/firebase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(args)
+      });
+      if (!res.ok) throw new Error(await res.text() || "Firebase bridge failed");
+      return res.json();
+    },
+    onSuccess: (user) => {
+      queryClient.setQueryData(["/api/user"], user);
     },
   });
 
@@ -79,6 +89,8 @@ export function useAuth() {
     isLoggingIn: loginMutation.isPending,
     register: registerMutation.mutateAsync,
     isRegistering: registerMutation.isPending,
+    loginWithFirebase: firebaseLoginMutation.mutateAsync,
+    isFirebaseWorking: firebaseLoginMutation.isPending,
     logout: logoutMutation.mutate,
     isLoggingOut: logoutMutation.isPending,
   };

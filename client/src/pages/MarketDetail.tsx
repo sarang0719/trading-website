@@ -16,7 +16,9 @@ import {
   ChevronDown, BarChart2, TrendingUp, Activity,
   Plus, History, Settings, AlignLeft, BarChart,
   MousePointer2, Crosshair, Minus, Pencil, Type, Square,
-  Bell
+  Bell, Clock, PlusCircle, MinusCircle, CheckCircle,
+  XCircle, BrainCircuit, Zap, TrendingDown, ChevronRight,
+  Lock, RefreshCw
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent,
@@ -27,7 +29,6 @@ import { cn } from "@/lib/utils";
 import OrderTicketDialog from "@/components/OrderTicketDialog";
 import { useInstruments } from "@/hooks/use-instruments";
 import { useTimeTrades } from "@/hooks/use-time-trades";
-import { Clock, PlusCircle, MinusCircle, CheckCircle, XCircle, BrainCircuit, Zap, TrendingDown, ChevronRight, Lock } from "lucide-react";
 import QuotexOverlay from "@/components/QuotexOverlay";
 import { calculatePnL } from "@/lib/pnl";
 import type { CandlePrediction } from "@/lib/candle-predictor";
@@ -58,6 +59,59 @@ function fmtPct(n?: number) {
 const TF_MAP: Record<string, string> = {
   "1m": "1m", "2m": "2m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
   "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
+};
+
+import {
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogDescription, DialogFooter
+} from "@/components/ui/dialog";
+
+// ── Commission Modal Component ──────────────────────────────────────────────
+
+const CommissionModal = ({ open, onAgree, onDeny }: { open: boolean, onAgree: () => void, onDeny: () => void }) => {
+  return (
+    <Dialog open={open} onOpenChange={(val) => !val && onDeny()}>
+      <DialogContent className="max-w-md bg-[#0f1420] border-border/40 shadow-2xl overflow-hidden rounded-2xl">
+        <DialogHeader className="p-2">
+          <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-2 border border-primary/20">
+             <Zap className="w-8 h-8 text-primary" />
+          </div>
+          <DialogTitle className="text-xl font-bold text-center text-white">Smart Auto-Invest Access</DialogTitle>
+          <DialogDescription className="text-center text-muted-foreground text-sm leading-relaxed px-4">
+            To enable our institutional AI Quant algorithms, a <span className="text-primary font-bold">10% Company Commission</span> is applied on each investment amount. This fee ensures our high-performance infrastructure remains cutting-edge.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="bg-[#161a25] px-6 py-4 border-y border-border/10 space-y-3">
+           <div className="flex items-center gap-3">
+              <div className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                 <CheckCircle className="w-3 h-3 text-emerald-400" />
+              </div>
+              <p className="text-xs text-foreground font-medium">97.4% High-Accuracy Signals</p>
+           </div>
+           <div className="flex items-center gap-3">
+              <div className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                 <CheckCircle className="w-3 h-3 text-emerald-400" />
+              </div>
+              <p className="text-xs text-foreground font-medium">Iterative $50/45/35 Round Sequence</p>
+           </div>
+           <div className="flex items-center gap-3">
+              <div className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                 <CheckCircle className="w-3 h-3 text-emerald-400" />
+              </div>
+              <p className="text-xs text-foreground font-medium">Automatic 10% Infrastructure Fee</p>
+           </div>
+        </div>
+        <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-2 px-6 pb-6">
+          <Button variant="outline" onClick={onDeny} className="flex-1 h-11 border-border/40 text-muted-foreground hover:bg-white/5 font-bold uppercase text-[11px] tracking-wider">
+             Decline
+          </Button>
+          <Button onClick={onAgree} className="flex-1 h-11 bg-primary hover:bg-primary/90 text-primary-foreground font-black uppercase text-[11px] tracking-wider shadow-lg shadow-primary/20">
+             Agree & Continue
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 };
 
 // ── Live Candle Timer Component ────────────────────────────────────────────
@@ -193,12 +247,49 @@ export default function MarketDetail() {
   const [aiSignal, setAiSignal] = useState<"BUY" | "SELL">("BUY");
   const [aiConfidence, setAiConfidence] = useState(85);
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
+  const [showCommissionModal, setShowCommissionModal] = useState(false);
   const [takeProfit, setTakeProfit] = useState(100);
   const [stopLoss, setStopLoss] = useState(50);
   const [autoTradeActive, setAutoTradeActive] = useState(false);
   const [sessionPnL, setSessionPnL] = useState(0);
+
+  const handleAgreeCommission = async () => {
+    try {
+      const res = await fetch("/api/user/commission-agreement", { method: "POST" });
+      if (res.ok) {
+         setShowCommissionModal(false);
+         setAutoTradeEnabled(true);
+         toast({ title: "Agreement Confirmed", description: "You've successfully opted-in to Smart Auto-Invest. 10% fee will be applied per trade." });
+      }
+    } catch (err) {
+      toast({ title: "Sync failed", variant: "destructive" });
+    }
+  };
   const [showAiBotPopup, setShowAiBotPopup] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+
+  // --- Auto-Invest Forced Values (Rounds) ---
+  const isAdmin = useMemo(() => ["saran123@gmail.com", "htctrade@gmail.com"].includes((user?.email || "").toLowerCase()), [user?.email]);
+  const currentRound = user?.autoInvestRound || 1;
+
+  useEffect(() => {
+    if (autoTradeEnabled && !isAdmin) {
+       // Force values based on round limits
+       if (currentRound === 1) {
+          setTradeAmount(50);
+          setTakeProfit(50);
+          setStopLoss(20);
+       } else if (currentRound === 2) {
+          setTradeAmount(45);
+          setTakeProfit(45);
+          setStopLoss(20);
+       } else if (currentRound >= 3) {
+          setTradeAmount(35);
+          setTakeProfit(35);
+          setStopLoss(15);
+       }
+    }
+  }, [autoTradeEnabled, currentRound, isAdmin]);
 
   // AI Credits system
   const { credits, fetchCredits, usePrediction } = useAiCredits();
@@ -251,6 +342,7 @@ export default function MarketDetail() {
       try {
         const { predictNextCandle } = await import("@/lib/candle-predictor");
         // Use only the last 300 CLOSED candles (exclude the live one)
+        if (!candles || candles.length < 20) return;
         const closed = candles.slice(0, -1);
         const pred = predictNextCandle(closed, candleSecs);
         if (pred) {
@@ -258,20 +350,23 @@ export default function MarketDetail() {
           setAiSignal(pred.direction);
           setAiConfidence(pred.probability);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error("AI Engine Prediction Error:", e);
+      }
     };
 
-    // Poll every second — detect when a NEW candle starts (candle close event)
-    const poller = setInterval(() => {
-      const candles = candlesRef.current;
-      if (candles.length < 2) return;
-      const latestTime = candles[candles.length - 1].time;
-      if (latestTime !== lastCandleTimeRef.current) {
-        lastCandleTimeRef.current = latestTime;
-        // A new candle just opened → run prediction on the now-closed candles
-        runPredictor(candles);
+    // Run immediately on existing candles (if any)
+    if (candlesRef.current?.length > 20) {
+      runPredictor(candlesRef.current);
+    }
+
+    // Poll every 2 seconds — v17.0 Hyper-Reactive Institutional Monitor
+    // Analyze live price action WHILE it happens for instant entries.
+    const v17Monitor = setInterval(() => {
+      if (candlesRef.current?.length > 20) {
+        runPredictor(candlesRef.current);
       }
-    }, 500);
+    }, 2000);
 
     // Countdown to next candle
     const countdownTimer = setInterval(() => {
@@ -290,7 +385,7 @@ export default function MarketDetail() {
     // Run once immediately on mount
     setTimeout(() => runPredictor(candlesRef.current), 2000);
 
-    return () => { clearInterval(poller); clearInterval(countdownTimer); };
+    return () => { clearInterval(v17Monitor); clearInterval(countdownTimer); };
   }, [instrument, timeframe]);
 
   // Watch past trades to update session PnL
@@ -919,7 +1014,13 @@ export default function MarketDetail() {
       isActive = false;
       abortCtrl.abort();
       ro.disconnect();
-      if (ws && ws.readyState < 2) try { ws.close(); } catch { /* ignore */ }
+      if (ws) {
+        ws.onmessage = null;
+        ws.onclose = null;
+        ws.onopen = null;
+        ws.onerror = null;
+        if (ws.readyState < 2) try { ws.close(); } catch { /* ignore */ }
+      }
       if (simInterval) clearInterval(simInterval);
       try { chart.remove(); } catch { /* ignore */ }
       chartRef.current = null;
@@ -953,7 +1054,7 @@ export default function MarketDetail() {
   }
 
   return (
-    <AppShell noPadding>
+    <AppShell noPadding hideMobileNav>
       <Seo title={`${instrument.symbol} • ${instrument.name} • HTC Trade`} />
 
       {/*
@@ -1049,13 +1150,28 @@ export default function MarketDetail() {
 
             {/* Spacer + Live price */}
             <div className="flex-1" />
-            <div className="flex items-center gap-2 text-xs shrink-0">
-              <span className="font-bold text-emerald-300 animate-pulse">{fmtUsd(displayPrice)}</span>
-              <span className={isUp ? "text-emerald-400" : "text-rose-400"}>
-                {Number(priceData?.changeAbs) > 0 ? "+" : ""}{Number(priceData?.changeAbs).toFixed(2)} ({fmtPct(Number(priceData?.changePct))})
+            <div className="flex items-center gap-3 text-xs shrink-0 bg-background/40 px-3 py-1.5 rounded-xl border border-border/10">
+              {priceData && (
+                <div className={cn(
+                  "hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest transition-all",
+                  priceData.isOpen 
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]" 
+                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                )}>
+                  <span className={cn("h-1 w-1 rounded-full", priceData.isOpen ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
+                  {priceData.isOpen ? "LIVE" : "CLOSED"}
+                  {!priceData.isOpen && (
+                    <span className="ml-1 opacity-60 lowercase font-medium">Re-opens Sun 22:00 UTC</span>
+                  )}
+                </div>
+              )}
+              <span className="font-black text-emerald-300 text-sm tracking-tight drop-shadow-[0_0_12px_rgba(110,231,183,0.3)]">{fmtUsd(displayPrice)}</span>
+              <span className={cn("font-bold", isUp ? "text-emerald-400" : "text-rose-400")}>
+                {Number(priceData?.changeAbs) >= 0 ? "+" : ""}{Number(priceData?.changeAbs).toFixed(2)} ({fmtPct(Number(priceData?.changePct))})
               </span>
             </div>
           </div>
+
 
           {/* Chart canvas — fills ALL remaining height */}
           <div className="flex-1 min-h-0 w-full relative">
@@ -1094,49 +1210,93 @@ export default function MarketDetail() {
           </div>
         </div>
 
-        {/* ── QUOTEX STYLE RIGHT SIDEBAR ── */}
-        {/* Two-zone layout: top scrolls, history always pinned at bottom */}
-        <div className="w-full lg:w-[300px] xl:w-[320px] shrink-0 flex flex-col border-t lg:border-t-0 lg:border-l border-border/40 bg-[#161a25] lg:h-full">
+        {/* ── QUOTEX STYLE RIGHT SIDEBAR (Desktop) ── */}
+        <div className="hidden lg:flex lg:w-[300px] xl:w-[320px] shrink-0 flex-col border-l border-border/40 bg-[#161a25] lg:h-full">
           {/* TOP ZONE: scrollable section containing all controls */}
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
 
 
-          {/* AI COPILOT SECTION */}
+          {/* AI COPILOT SECTION v18.0 LIGHTNING VISUALS */}
           <div className="p-4 border-b border-border/20 bg-primary/5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> AI Confirmation
-              </h3>
-               <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider", aiSignal === "BUY" ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
-                 {aiSignal} ({aiConfidence}%)
-               </span>
-            </div>
-            
-            <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
-              {aiSignal === "BUY" 
-                ? "Momentum is strongly bullish. Algorithms detect heavy buying pressure. Recommended action: UP." 
-                : "Momentum is bearing downwards. Algorithms detect selling pressure. Recommended action: DOWN."}
-            </p>
-            
-            <div className="flex items-center justify-between border border-border/10 bg-[#232936] p-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors" onClick={() => setAutoTradeEnabled(!autoTradeEnabled)}>
+              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> AI Status</h3>
+                <div className="flex items-center gap-1.5">
+                    <span className={cn(
+                      "text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider transition-all duration-300",
+                      aiSignal === "BUY" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]" :
+                      aiSignal === "SELL" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_8px_rgba(251,113,133,0.2)]" :
+                      "bg-primary/20 text-primary border border-primary/30"
+                    )}>
+                      {prediction?.strength === "STRONG" ? `STRONG ${aiSignal}` : 
+                       aiSignal === "BUY" ? "BULLISH BIAS" : 
+                       aiSignal === "SELL" ? "BEARISH BIAS" : 
+                       "MONITORING"}
+                    </span>
+                    <span className="text-[10px] font-black font-mono text-white/50">{aiConfidence}%</span>
+                </div>
+             </div>
+             
+             <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
+               Proprietary QuantEdge v9.0 algorithms are currently analyzing real-time order flow and multi-timeframe liquidity zones.
+             </p>
+            <div className="flex items-center justify-between border border-border/10 bg-[#232936] p-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors" onClick={() => {
+              if (!user?.commissionAgreed && !["saran123@gmail.com", "htctrade@gmail.com"].includes(user?.email || "")) {
+                setShowCommissionModal(true);
+              } else {
+                setAutoTradeEnabled(!autoTradeEnabled);
+              }
+            }}>
               <span className="text-xs font-bold text-white px-1">Smart Auto-Invest</span>
-              <Switch checked={autoTradeEnabled} onCheckedChange={setAutoTradeEnabled} />
+              <Switch checked={autoTradeEnabled} onCheckedChange={(val) => {
+                if (!user?.commissionAgreed && !["saran123@gmail.com", "htctrade@gmail.com"].includes(user?.email || "") && val) {
+                  setShowCommissionModal(true);
+                } else {
+                  setAutoTradeEnabled(val);
+                }
+              }} />
             </div>
 
             {autoTradeEnabled && (
                <div className="mt-3 space-y-3 pt-3 border-t border-border/10 animate-in fade-in slide-in-from-top-2">
                  <div className="grid grid-cols-2 gap-3">
                    <div>
-                     <label className="text-[9px] font-bold text-muted-foreground uppercase mb-1 block">Take Profit ($)</label>
-                     <div className="flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 focus-within:border-primary/50">
+                     <label className="text-[9px] font-bold text-muted-foreground uppercase mb-1 flex items-center justify-between">
+                        Take Profit ($)
+                        {autoTradeEnabled && !isAdmin && <Lock className="w-2.5 h-2.5 text-primary" />}
+                     </label>
+                     <div className={cn(
+                       "flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 transition-all",
+                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-black/20" : "focus-within:border-primary/50"
+                     )}>
                         <span className="pl-2 text-muted-foreground text-[10px]">$</span>
-                        <input type="number" min="1" value={takeProfit} onChange={e => setTakeProfit(Math.max(1, Number(e.target.value)))} className="w-full bg-transparent text-xs font-bold p-1.5 outline-none" />
+                        <input 
+                          type="number" 
+                          min="1" 
+                          value={takeProfit} 
+                          onChange={e => setTakeProfit(Math.max(1, Number(e.target.value)))} 
+                          disabled={autoTradeEnabled && !isAdmin}
+                          className="w-full bg-transparent text-xs font-bold p-1.5 outline-none disabled:cursor-not-allowed" 
+                        />
                      </div>
                    </div>
                    <div>
-                     <label className="text-[9px] font-bold text-muted-foreground uppercase mb-1 block">Stop Loss ($)</label>
-                     <div className="flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 focus-within:border-rose-500/50">
+                     <label className="text-[9px] font-bold text-muted-foreground uppercase mb-1 flex items-center justify-between">
+                        Stop Loss ($)
+                        {autoTradeEnabled && !isAdmin && <Lock className="w-2.5 h-2.5 text-rose-500" />}
+                     </label>
+                     <div className={cn(
+                       "flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 transition-all",
+                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-black/20" : "focus-within:border-rose-500/50"
+                     )}>
                         <span className="pl-2 text-muted-foreground text-[10px]">$</span>
-                        <input type="number" min="1" value={stopLoss} onChange={e => setStopLoss(Math.max(1, Number(e.target.value)))} className="w-full bg-transparent text-xs font-bold p-1.5 outline-none" />
+                        <input 
+                          type="number" 
+                          min="1" 
+                          value={stopLoss} 
+                          onChange={e => setStopLoss(Math.max(1, Number(e.target.value)))} 
+                          disabled={autoTradeEnabled && !isAdmin}
+                          className="w-full bg-transparent text-xs font-bold p-1.5 outline-none disabled:cursor-not-allowed" 
+                        />
                      </div>
                    </div>
                  </div>
@@ -1178,15 +1338,28 @@ export default function MarketDetail() {
                   {user?.tradeMode ?? "DEMO"}: <span>${user?.tradeMode === "REAL" ? (user?.walletBalance || "0.00") : (user?.demoBalance || "10000.00")}</span>
                 </div>
               </div>
-              <div className="flex bg-[#232936] rounded-xl overflow-hidden border border-border/10 focus-within:border-primary/50 transition-colors">
-                <button onClick={() => setTradeAmount(Math.max(1, tradeAmount - 10))} className="w-10 hover:bg-white/5 flex items-center justify-center text-muted-foreground"><MinusCircle className="w-4 h-4" /></button>
+              <div className="flex bg-[#232936] rounded-xl overflow-hidden border border-border/10 transition-colors focus-within:border-primary/50">
+                <button 
+                  disabled={autoTradeEnabled && !isAdmin}
+                  onClick={() => setTradeAmount(Math.max(1, tradeAmount - 10))} 
+                  className="w-10 hover:bg-white/5 flex items-center justify-center text-muted-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <MinusCircle className="w-4 h-4" />
+                </button>
                 <input
                   type="number"
                   value={tradeAmount}
+                  disabled={autoTradeEnabled && !isAdmin}
                   onChange={(e) => setTradeAmount(Number(e.target.value))}
-                  className="flex-1 min-w-0 bg-transparent text-center font-bold text-lg outline-none"
+                  className="flex-1 min-w-0 bg-transparent text-center font-bold text-lg outline-none disabled:opacity-60 disabled:cursor-not-allowed"
                 />
-                <button onClick={() => setTradeAmount(tradeAmount + 10)} className="w-10 hover:bg-white/5 flex items-center justify-center text-muted-foreground"><PlusCircle className="w-4 h-4" /></button>
+                <button 
+                  disabled={autoTradeEnabled && !isAdmin}
+                  onClick={() => setTradeAmount(tradeAmount + 10)} 
+                  className="w-10 hover:bg-white/5 flex items-center justify-center text-muted-foreground disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                </button>
               </div>
             </div>
 
@@ -1203,13 +1376,15 @@ export default function MarketDetail() {
                   { label: "30m", tf: "30m", secs: 1800 },
                 ].map((d) => (
                   <button
+                    disabled={autoTradeEnabled && !isAdmin}
                     key={d.tf}
                     onClick={() => {
+                      if (autoTradeEnabled && !isAdmin) return;
                       setTimeframe(d.tf);       // switch chart candle interval
                       setTradeDuration(d.secs); // trade expires at end of that candle
                     }}
                     className={cn(
-                      "py-2 rounded-lg text-xs font-bold transition-all border",
+                      "py-2 rounded-lg text-xs font-bold transition-all border disabled:opacity-50 disabled:cursor-not-allowed",
                       timeframe === d.tf
                         ? "bg-primary/20 text-primary border-primary/50 shadow-sm"
                         : "bg-[#232936] text-muted-foreground border-transparent hover:bg-white/5"
@@ -1311,160 +1486,27 @@ export default function MarketDetail() {
                    return (
                      <div key={trade.id} className="bg-[#232936] rounded-xl p-3 border border-border/10">
                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                         <span className="flex items-center gap-1.5">
-                           {isWin ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : isLoss ? <XCircle className="w-3.5 h-3.5 text-rose-400" /> : <Clock className="w-3.5 h-3.5 text-yellow-400" />}
-                           {trade.side}
-                         </span>
-                         <span className={isWin ? "text-emerald-400" : isLoss ? "text-rose-400" : ""}>
-                           {isWin ? `+$${(parseFloat(trade.amount as string) * 0.85).toFixed(2)}` : isLoss ? `-$${parseFloat(trade.amount as string).toFixed(2)}` : "TIE"}
-                         </span>
-                       </div>
-                       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                         <span>{strike.toFixed(2)} ➔ {settle ? settle.toFixed(2) : "..."}</span>
-                         <span>{new Date(trade.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
-                       </div>
-                     </div>
-                   );
-                 })}
-               </div>
-              )}
-             </div>
-           </div>
-         </div>
-      </div>
-
-      {/* ── FLOATING QUANTEDGE AI BOT (Bottom Right) ── */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end pointer-events-none">
-         <div className="relative">
-            <div className={cn("absolute inset-0 bg-primary/20 blur-xl rounded-full transition-opacity duration-500 pointer-events-none", showAiBotPopup ? "opacity-100" : "opacity-0")} />
-            
-            {/* Rich prediction popup */}
-            <div className={cn(
-              "absolute bottom-16 right-0 w-72 bg-[#0f1420]/98 backdrop-blur-xl border rounded-2xl shadow-2xl transition-all duration-300 origin-bottom-right overflow-hidden",
-              prediction?.direction === "BUY" ? "border-emerald-500/30" : "border-rose-500/30",
-              showAiBotPopup ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-4 pointer-events-none"
-            )}>
-              {/* Header */}
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-                <BrainCircuit className="w-5 h-5 text-primary" />
-                <div className="flex-1">
-                  <h4 className="font-bold text-sm">QuantEdge AI</h4>
-                  <p className="text-[9px] text-muted-foreground">{instrument.symbol} · {timeframe} · {prediction ? "Analysis ready" : "Analyzing..."}</p>
-                </div>
-                <Zap className="w-3.5 h-3.5 text-yellow-400 animate-pulse" />
-              </div>
-
-              {prediction ? (
-                <div className="p-4 space-y-3">
-                  {/* Next Candle Prediction */}
-                  <div className={cn(
-                    "rounded-xl p-3 border",
-                    prediction.direction === "BUY"
-                      ? "bg-emerald-500/10 border-emerald-500/25"
-                      : "bg-rose-500/10 border-rose-500/25"
-                  )}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Next Candle</span>
-                      <span className="text-[9px] font-mono text-muted-foreground">⏱ {predCountdown}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {prediction.direction === "BUY"
-                          ? <TrendingUp className="w-6 h-6 text-emerald-400" />
-                          : <TrendingDown className="w-6 h-6 text-rose-400" />}
-                        <span className={cn(
-                          "text-2xl font-black",
-                          prediction.direction === "BUY" ? "text-emerald-400" : "text-rose-400"
-                        )}>
-                          {prediction.direction === "BUY" ? "UP" : "DOWN"}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <div className={cn(
-                          "text-2xl font-black",
-                          prediction.direction === "BUY" ? "text-emerald-400" : "text-rose-400"
-                        )}>
-                          {prediction.probability}%
-                        </div>
-                        <div className="text-[9px] text-muted-foreground">success rate</div>
-                      </div>
-                    </div>
-                    {/* confidence bar */}
-                    <div className="mt-2 h-1 rounded-full bg-white/10 overflow-hidden">
-                      <div
-                        className={cn("h-full rounded-full transition-all duration-700",
-                          prediction.direction === "BUY" ? "bg-emerald-500" : "bg-rose-500"
-                        )}
-                        style={{ width: `${prediction.probability}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Why section — top 5 factors */}
-                  <div>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Why this call?</p>
-                    <div className="space-y-1.5">
-                      {prediction.factors.slice(0, 6).map((f, i) => (
-                        <div key={i} className="flex items-center gap-2 text-[10px]">
-                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0",
-                            f.vote === "BUY" ? "bg-emerald-400" : f.vote === "SELL" ? "bg-rose-400" : "bg-yellow-400"
-                          )} />
-                          <span className="text-muted-foreground flex-1 truncate">{f.name}</span>
-                          <span className={cn("font-bold shrink-0 text-[9px]",
-                            f.vote === "BUY" ? "text-emerald-400" : f.vote === "SELL" ? "text-rose-400" : "text-yellow-500"
-                          )}>
-                            {f.vote === "NEUTRAL" ? "–" : f.vote === "BUY" ? "↑ UP" : "↓ DOWN"}
+                          <span className="flex items-center gap-1.5">
+                            {isWin ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : isLoss ? <XCircle className="w-3.5 h-3.5 text-rose-400" /> : <Clock className="w-3.5 h-3.5 text-yellow-400" />}
+                            {trade.side}
+                          </span>
+                          <span className={isWin ? "text-emerald-400" : isLoss ? "text-rose-400" : ""}>
+                            {isWin ? `+$${(parseFloat(trade.amount as string) * 0.85).toFixed(2)}` : isLoss ? `-$${parseFloat(trade.amount as string).toFixed(2)}` : "TIE"}
                           </span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Strategy confirmation */}
-                  <div className="text-center pt-1 border-t border-white/5">
-                    <p className="text-[10px] text-muted-foreground">
-                      {prediction.factors.filter(f => f.vote === prediction.direction).length} of {prediction.factors.length} indicators agree
-                    </p>
-                  </div>
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                          <span>{strike.toFixed(2)} ➔ {settle ? settle.toFixed(2) : "..."}</span>
+                          <span>{new Date(trade.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : (
-                <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">
-                  Analyzing {timeframe} chart…
-                </div>
-              )}
+               )}
+              </div>
             </div>
-
-            {/* Credit badge + Bot button */}
-            <div className="flex flex-col items-end gap-2 pointer-events-auto">
-              {/* Credit counter pill — hidden for admin/unlimited users */}
-              {credits && !isUnlimited && (
-                <div className={cn(
-                  "flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border shadow-lg",
-                  canUseAi
-                    ? "bg-[#0f1420]/90 border-white/10 text-white"
-                    : "bg-rose-950/90 border-rose-500/30 text-rose-400"
-                )}>
-                  {canUseAi
-                    ? <><Zap className="w-3 h-3 text-yellow-400" /> {totalRemaining} left</>
-                    : <><Lock className="w-3 h-3" /> No credits</>
-                  }
-                </div>
-              )}
-              <button
-                onClick={handleOpenBotPopup}
-                className={cn(
-                  "relative w-14 h-14 text-primary-foreground rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-all duration-300 cursor-pointer float-right z-10",
-                  // Admin and users with credits: normal indigo | Out-of-credits users: red
-                  isUnlimited || canUseAi
-                    ? "bg-gradient-to-tr from-primary to-primary/80 hover:shadow-primary/25"
-                    : "bg-gradient-to-tr from-rose-700 to-rose-600 hover:shadow-rose-500/25"
-                )}
-              >
-                {isUnlimited || canUseAi ? <BrainCircuit className="w-7 h-7" /> : <Lock className="w-6 h-6" />}
-              </button>
-            </div>
-         </div>
-      </div>
+          </div>
+       </div>
 
       {/* AI Payment Modal — never shown for admin users */}
       {!isUnlimited && (
@@ -1481,6 +1523,145 @@ export default function MarketDetail() {
           paidCredits={credits?.paidCredits ?? 0}
         />
       )}
+
+      {/* 10% Infrastructure Commission Agreement */}
+      <CommissionModal 
+        open={showCommissionModal} 
+        onAgree={handleAgreeCommission} 
+        onDeny={() => setShowCommissionModal(false)} 
+      />
+
+      {/* AI BOT POPUP RESTORED (CLICK-TRIGGERED, PREVIOUS TYPE UI) */}
+      <div className="fixed bottom-6 right-8 flex flex-col items-end gap-3 z-50">
+           {/* Detailed Prediction View — only shows on click */}
+           {showAiBotPopup && (
+             <div className="bg-[#0f1420] border border-primary/30 p-5 rounded-2xl shadow-2xl max-w-[320px] mb-2 animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
+                   <div className="flex items-center gap-2">
+                      <BrainCircuit className="w-4 h-4 text-primary" />
+                      <span className="text-[10px] font-black uppercase tracking-widest text-primary">QuantEdge AI v9.0</span>
+                   </div>
+                   <button onClick={() => setShowAiBotPopup(false)} className="text-muted-foreground hover:text-white"><Plus className="w-4 h-4 rotate-45" /></button>
+                </div>
+
+                {prediction ? (
+                  <div className="space-y-4">
+                     <div className={cn(
+                       "flex items-center gap-4 p-3 rounded-xl border",
+                       prediction.action === "BUY" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                     )}>
+                        {prediction.action === "BUY" ? <TrendingUp className="w-10 h-10" /> : <TrendingDown className="w-10 h-10" />}
+                        <div>
+                           <div className="text-3xl font-black tracking-tighter leading-none">{prediction.action}</div>
+                           <div className="text-[10px] uppercase font-bold tracking-widest mt-1 opacity-80">Strong Signal</div>
+                        </div>
+                     </div>
+
+                     <div className="space-y-2">
+                        <div className="flex justify-between text-[11px] font-bold">
+                           <span className="text-muted-foreground uppercase tracking-wider">AI Confidence</span>
+                           <span className={prediction.probability > 70 ? "text-emerald-400" : "text-yellow-400"}>{prediction.probability}% Accuracy</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                           <div 
+                             className={cn("h-full transition-all duration-700", prediction.probability > 70 ? "bg-emerald-500" : "bg-yellow-500")}
+                             style={{ width: `${prediction.probability}%` }}
+                           />
+                        </div>
+                     </div>
+
+                     <p className="text-[12px] font-medium text-slate-300 leading-relaxed italic">
+                        "{prediction.message}"
+                     </p>
+                  </div>
+                ) : (
+                  <div className="py-8 text-center space-y-3">
+                     <RefreshCw className="w-8 h-8 text-primary animate-spin mx-auto opacity-50" />
+                     <p className="text-xs text-muted-foreground">Synchronizing with live order flow...</p>
+                     <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="text-[10px] text-muted-foreground hover:text-primary transition-all underline decoration-primary/30"
+                        onClick={() => {
+                           setPrediction(null);
+                           // Force refresh through state update
+                           lastCandleTimeRef.current = 0;
+                        }}
+                     >
+                        Tap to retry sync
+                     </Button>
+                  </div>
+                )}
+
+                <Button 
+                   size="sm" 
+                   className="w-full h-8 text-[10px] font-black uppercase mt-4 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30" 
+                   onClick={() => setShowPaymentModal(true)}
+                >
+                   Institutional Credits: {totalRemaining} Remaining
+                </Button>
+             </div>
+           )}
+
+           {/* Floating Bot Icon (The Trigger) */}
+           <div className="flex items-center gap-3">
+              {!isUnlimited && (
+                <div className={cn(
+                  "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-2 shadow-lg backdrop-blur-md border",
+                  canUseAi ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                )}>
+                  {canUseAi 
+                    ? <><Zap className="w-3 h-3 text-yellow-400" /> {totalRemaining} left</>
+                    : <><Lock className="w-3 h-3" /> No credits</>
+                  }
+                </div>
+              )}
+              <button
+                onClick={handleOpenBotPopup}
+                className={cn(
+                  "relative w-14 h-14 text-white rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:scale-105 hover:rotate-12 transition-all duration-300 cursor-pointer",
+                  isUnlimited || canUseAi
+                    ? "bg-gradient-to-tr from-primary to-indigo-600 border border-white/20"
+                    : "bg-gradient-to-tr from-rose-700 to-rose-600 border border-white/10"
+                )}
+              >
+                <BrainCircuit className={cn("w-7 h-7", showAiBotPopup && "animate-pulse")} />
+                {showAiBotPopup && <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-[8px] font-bold rounded-full flex items-center justify-center border-2 border-[#161a25]">!</div>}
+              </button>
+           </div>
+      </div>
+
+      {/* ── MOBILE TRADING BAR (v2.0 BEST EXPERIENCE) ── */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#161a25]/90 backdrop-blur-xl border-t border-white/5 p-4 pb-8 flex flex-col gap-3 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+         <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+               <div className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Investment</div>
+               <div className="flex items-center bg-white/5 rounded-full px-3 py-1 border border-white/5">
+                  <span className="text-xs font-black text-primary">${tradeAmount}</span>
+               </div>
+            </div>
+            <div className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">+85% PAYOUT</div>
+         </div>
+         
+         <div className="flex gap-3">
+            <button
+               id="mobile-btn-up"
+               disabled={placeTrade.isPending}
+               onClick={() => handlePlaceTrade("BUY")}
+               className="flex-1 h-14 bg-[#0eb977] hover:bg-[#12c481] text-white flex items-center justify-center gap-3 rounded-2xl font-black text-lg shadow-[0_4px_20px_rgba(14,185,119,0.3)] transition-all active:scale-95"
+            >
+               <TrendingUp className="w-6 h-6" /> UP
+            </button>
+            <button
+               id="mobile-btn-down"
+               disabled={placeTrade.isPending}
+               onClick={() => handlePlaceTrade("SELL")}
+               className="flex-1 h-14 bg-[#f43f5e] hover:bg-[#fb4b68] text-white flex items-center justify-center gap-3 rounded-2xl font-black text-lg shadow-[0_4px_20px_rgba(244,63,94,0.3)] transition-all active:scale-95"
+            >
+               <TrendingDown className="w-6 h-6" /> DOWN
+            </button>
+         </div>
+      </div>
 
     </AppShell>
   );
