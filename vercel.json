@@ -1,5 +1,12 @@
 {
   "version": 2,
+  "functions": {
+    "dist/index.cjs": {
+      "runtime": "vercel-node@latest",
+      "memory": 1024,
+      "maxDuration": 15
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
