@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(process.cwd(), "dist", "public");
+  const distPath = path.resolve(process.cwd(), "dist");
   console.log(`[Static] Serving assets from: ${distPath}`);
   if (!fs.existsSync(distPath)) {
     throw new Error(
