@@ -71,18 +71,34 @@ export function startAiBotEngine() {
              const expiresAt = new Date(Date.now() + 30 * 1000);
 
              const userAmount = user.autoTradeAmount || "5.00";
+             const amountNum = parseFloat(userAmount);
 
-             await db.insert(timeBasedOrders).values({
-               userId: user.id,
+             // Check if user has enough Real Wallet Balance
+             if (parseFloat(user.walletBalance as string) < amountNum) {
+                // Auto-disable autoTrade and stop
+                await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
+                continue;
+             }
+
+             // Deduct Wallet Balance 
+             await storage.updateWalletBalance(user.id, -amountNum);
+
+             const order = await storage.createTimeBasedOrder(user.id, {
                instrumentId: inst.id,
                placedBy: "AI_BOT", 
                side: signal,
-               amount: userAmount,
+               amount: String(amountNum),
                strikePrice: String(price),
                durationSeconds: 30,
                expiresAt,
                status: "ACTIVE" as any,
-             });
+             } as any);
+
+             // Log Transaction
+             await storage.createWalletTransaction({
+                userId: user.id, type: "TRADE_DEDUCTION", amount: String(amountNum),
+                status: "SUCCESS", referenceId: String(order.id)
+             } as any);
 
              console.log(`[AI Bot v2.0] ${signal} on ${sym} @ ${price} for User ${user.email || user.id} (Score: ${score}/10, Amount: $${userAmount})`);
            } catch {

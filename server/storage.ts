@@ -12,6 +12,7 @@ import {
   watchlists,
   learnArticles,
   users,
+  walletTransactions,
   type CreateOrderRequest,
   type CreatePortfolioRequest,
   type CreateWatchlistItemRequest,
@@ -32,6 +33,8 @@ import {
   type LatestPrice,
   type User,
   type UpsertUser,
+  type WalletTransaction,
+  type InsertWalletTransaction,
 } from "@shared/schema";
 
 function num(v: any): number {
@@ -46,6 +49,16 @@ export interface IStorage {
   createUser(user: UpsertUser): Promise<User>;
   updateAiTradeConsent(userId: string, enabled?: boolean, amount?: string): Promise<void>;
   updateAiCredits(userId: string, update: { freePredictionsUsed?: number; paidCredits?: number }): Promise<void>;
+  
+  // Wallet System
+  updateWalletBalance(userId: string, amountOffset: number): Promise<User>;
+  updateDemoBalance(userId: string, amountOffset: number): Promise<User>;
+  setTradeMode(userId: string, mode: "DEMO" | "REAL"): Promise<User>;
+  resetDemoBalance(userId: string): Promise<User>;
+  getWalletInfo(userId: string): Promise<{ realBalance: string; demoBalance: string; tradeMode: string } | null>;
+  createWalletTransaction(tx: InsertWalletTransaction): Promise<WalletTransaction>;
+  getWalletTransactions(userId: string): Promise<WalletTransaction[]>;
+
   listInstruments(input?: {
     q?: string;
     assetClass?: string;
@@ -112,6 +125,53 @@ export class DatabaseStorage implements IStorage {
     if (Object.keys(payload).length > 0) {
       await db.update(users).set(payload).where(eq(users.id, userId));
     }
+  }
+
+  async updateWalletBalance(userId: string, amountOffset: number): Promise<User> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const newBalance = (parseFloat(user.walletBalance as string) || 0) + amountOffset;
+    const [updated] = await db.update(users).set({ walletBalance: newBalance.toFixed(2) }).where(eq(users.id, userId)).returning();
+    return updated;
+  }
+
+  async updateDemoBalance(userId: string, amountOffset: number): Promise<User> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    const newBalance = Math.max(0, (parseFloat(user.demoBalance as string) || 0) + amountOffset);
+    const [updated] = await db.update(users).set({ demoBalance: newBalance.toFixed(2) }).where(eq(users.id, userId)).returning();
+    return updated;
+  }
+
+  async setTradeMode(userId: string, mode: "DEMO" | "REAL"): Promise<User> {
+    const [updated] = await db.update(users).set({ tradeMode: mode as any }).where(eq(users.id, userId)).returning();
+    return updated;
+  }
+
+  async resetDemoBalance(userId: string): Promise<User> {
+    const [updated] = await db.update(users).set({ demoBalance: "10000.00" }).where(eq(users.id, userId)).returning();
+    return updated;
+  }
+
+  async getWalletInfo(userId: string): Promise<{ realBalance: string; demoBalance: string; tradeMode: string } | null> {
+    const [user] = await db.select({
+      walletBalance: users.walletBalance,
+      demoBalance: users.demoBalance,
+      tradeMode: users.tradeMode,
+    }).from(users).where(eq(users.id, userId));
+    if (!user) return null;
+    return {
+      realBalance: user.walletBalance as string,
+      demoBalance: user.demoBalance as string,
+      tradeMode: user.tradeMode as string,
+    };
+  }
+
+  async createWalletTransaction(tx: InsertWalletTransaction): Promise<WalletTransaction> {
+    const [inserted] = await db.insert(walletTransactions).values(tx).returning();
+    return inserted;
+  }
+
+  async getWalletTransactions(userId: string): Promise<WalletTransaction[]> {
+    return db.select().from(walletTransactions).where(eq(walletTransactions.userId, userId)).orderBy(desc(walletTransactions.createdAt));
   }
 
   async listInstruments(input?: { q?: string; assetClass?: string; exchange?: string }): Promise<(Instrument & { price?: LatestPrice })[]> {
@@ -526,6 +586,9 @@ export class DatabaseStorage implements IStorage {
 
       // Newly Requested Pairs
       // Forex
+      { symbol: "USDPKR", exchange: "FOREX", name: "US Dollar vs Pakistani Rupee", assetClass: "FOREX" as any, currency: "USD", country: "PK", isActive: true, imageUrl: null },
+      { symbol: "USDINR", exchange: "FOREX", name: "US Dollar vs Indian Rupee", assetClass: "FOREX" as any, currency: "USD", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "CADCHF", exchange: "FOREX", name: "Canadian Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CAD", country: "CH", isActive: true, imageUrl: null },
       { symbol: "EURUSD", exchange: "FOREX", name: "Euro vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "USDJPY", exchange: "FOREX", name: "US Dollar vs Yen", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "GBPUSD", exchange: "FOREX", name: "British Pound vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },

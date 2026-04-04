@@ -13,6 +13,7 @@ import Markets from "@/pages/Markets";
 import Orders from "@/pages/Orders";
 import PortfolioPage from "@/pages/Portfolio";
 import NewOrder from "@/pages/NewOrder";
+import WalletPage from "@/pages/WalletPage";
 import Learn from "@/pages/Learn";
 import LearnDetail from "@/pages/LearnDetail";
 import AIInsights from "@/pages/AIInsights";
@@ -31,6 +32,7 @@ function Router() {
       {/* App */}
       <Route path="/app" component={AppIndex} />
       <Route path="/app/portfolio" component={PortfolioPage} />
+      <Route path="/app/wallet" component={WalletPage} />
       <Route path="/app/watchlists" component={Watchlists} />
       <Route path="/app/watchlists/:id" component={WatchlistDetail} />
       <Route path="/app/markets" component={Markets} />

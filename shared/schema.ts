@@ -16,6 +16,8 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const tradeModeEnum = pgEnum("trade_mode", ["DEMO", "REAL"]);
+
 // =========================================================
 // AUTH (Replit Auth required tables)
 // =========================================================
@@ -39,11 +41,18 @@ export const users = pgTable(
     firstName: varchar("first_name"),
     lastName: varchar("last_name"),
     profileImageUrl: varchar("profile_image_url"),
+    firebaseUid: varchar("firebase_uid", { length: 128 }).unique(),
     autoTradeEnabled: boolean("auto_trade_enabled"),
     autoTradeAmount: varchar("auto_trade_amount").default("5.00"),
     // AI Prediction credit system
     freePredictionsUsed: integer("free_predictions_used").notNull().default(0),
     paidCredits: integer("paid_credits").notNull().default(0),
+    
+    // Wallet System — Real + Demo
+    walletBalance: numeric("wallet_balance", { precision: 18, scale: 2 }).notNull().default("0.00"),
+    demoBalance: numeric("demo_balance", { precision: 18, scale: 2 }).notNull().default("10000.00"),
+    tradeMode: tradeModeEnum("trade_mode").notNull().default("DEMO"),
+
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -316,3 +325,31 @@ export type OrdersListResponse = Order[];
 export type NewsFeedResponse = NewsArticle[];
 export type LearnListResponse = LearnArticle[];
 export type LearnDetailResponse = LearnArticle;
+
+// =========================================================
+// WALLET AND TRANSACTIONS MODEL
+// =========================================================
+
+export const transactionTypeEnum = pgEnum("transaction_type", ["DEPOSIT", "WITHDRAW", "TRADE_DEDUCTION", "TRADE_WIN", "DEMO_RESET"]);
+export const transactionStatusEnum = pgEnum("transaction_status", ["PENDING", "SUCCESS", "FAILED"]);
+
+export const walletTransactions = pgTable("wallet_transactions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: transactionTypeEnum("type").notNull(),
+  amount: numeric("amount", { precision: 18, scale: 2 }).notNull(),
+  status: transactionStatusEnum("status").notNull().default("SUCCESS"),
+  mode: varchar("mode", { length: 8 }).default("REAL"), // DEMO or REAL
+  referenceId: varchar("reference_id"), // E.g., Razorpay payment_id or trade_id
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type WalletTransaction = typeof walletTransactions.$inferSelect;
+export type InsertWalletTransaction = typeof walletTransactions.$inferInsert;
+
+// Wallet API response types
+export type WalletInfoResponse = {
+  realBalance: string;
+  demoBalance: string;
+  tradeMode: "DEMO" | "REAL";
+};

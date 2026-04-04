@@ -9,7 +9,8 @@ import {
   Sparkles,
   Briefcase,
   LogOut,
-  Zap
+  Zap,
+  Wallet
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
@@ -156,6 +157,25 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
            </div>
            
            <div className="flex items-center gap-3">
+             <Link href="/app/wallet">
+               <div className={cn(
+                 "flex items-center gap-2 border px-3 py-1.5 rounded-full cursor-pointer transition-all mr-2",
+                 user?.tradeMode === "REAL" 
+                   ? "bg-primary/10 border-primary/30 hover:bg-primary/20" 
+                   : "bg-violet-500/10 border-violet-500/30 hover:bg-violet-500/20"
+               )}>
+                 <Wallet className={cn("h-4 w-4", user?.tradeMode === "REAL" ? "text-primary" : "text-violet-400")} />
+                 <span className={cn("text-[10px] font-black uppercase tracking-tighter mr-0.5 opacity-70", 
+                   user?.tradeMode === "REAL" ? "text-primary" : "text-violet-400"
+                 )}>
+                   {user?.tradeMode ?? "DEMO"}
+                 </span>
+                 <span className={cn("text-sm font-bold", user?.tradeMode === "REAL" ? "text-primary" : "text-violet-400")}>
+                   ${user?.tradeMode === "REAL" ? (user?.walletBalance || "0.00") : (user?.demoBalance || "10000.00")}
+                 </span>
+               </div>
+             </Link>
+
              {/* Symbol search */}
              <div className="relative hidden lg:block ml-2">
                <input type="text" placeholder="Symbol search..." className="bg-secondary/30 border border-border/50 rounded-lg px-3 py-1.5 text-xs font-semibold w-56 focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all" />

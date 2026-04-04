@@ -105,6 +105,9 @@ export async function setupAuth(app: Express) {
           email: user.email,
           firstName: user.firstName,
           profileImageUrl: user.profileImageUrl,
+          walletBalance: user.walletBalance,
+          demoBalance: user.demoBalance,
+          tradeMode: user.tradeMode,
         });
       });
     } catch (err) {
@@ -119,6 +122,9 @@ export async function setupAuth(app: Express) {
       email: u.email,
       firstName: u.firstName,
       profileImageUrl: u.profileImageUrl,
+      walletBalance: u.walletBalance,
+      demoBalance: u.demoBalance,
+      tradeMode: u.tradeMode,
     });
   });
 
@@ -137,6 +143,9 @@ export async function setupAuth(app: Express) {
       email: u.email,
       firstName: u.firstName,
       profileImageUrl: u.profileImageUrl,
+      walletBalance: u.walletBalance,
+      demoBalance: u.demoBalance,
+      tradeMode: u.tradeMode,
     });
   });
 }

@@ -355,11 +355,30 @@ export function startBackgroundTasks() {
 
           const { result, returnAmount } = getFinalResult(trade, currentPrice);
 
-          // We would add wallet balances here (add returnAmount to balance)
           await storage.updateTimeBasedOrder(trade.id, {
             status: result as any, // "WIN" | "LOSS"
             settlePrice: currentPrice.toString(),
           });
+          
+          if (result === "WIN" && returnAmount > 0) {
+             try {
+                // Determine which balance to credit: check the trade's deduction transaction for mode
+                const txs = await storage.getWalletTransactions(trade.userId);
+                const deductTx = txs.find(t => t.referenceId === String(trade.id) && t.type === "TRADE_DEDUCTION");
+                const tradeMode = (deductTx as any)?.mode ?? "REAL";
+
+                if (tradeMode === "DEMO") {
+                  await storage.updateDemoBalance(trade.userId, returnAmount);
+                } else {
+                  await storage.updateWalletBalance(trade.userId, returnAmount);
+                }
+
+                await storage.createWalletTransaction({
+                   userId: trade.userId, type: "TRADE_WIN", amount: String(returnAmount),
+                   status: "SUCCESS", referenceId: String(trade.id), mode: tradeMode
+                } as any);
+             } catch(err) { console.error("Wallet payout failed for trade:", trade.id, err); }
+          }
           
           console.log(`Resolved Time Trade #${trade.id}: ${trade.side} @ ${trade.strikePrice} -> Settle ${currentPrice} = ${result}`);
         }

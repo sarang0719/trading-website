@@ -1,52 +1,36 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore, doc, setDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 
+// Production-ready Firebase configuration (Parameterised for Vercel)
 const firebaseConfig = {
-  apiKey: "AIzaSyDv6tIXw2M_xtF8EvzwRwAbv59BxujhdI0",
-  authDomain: "trading-82365.firebaseapp.com",
-  projectId: "trading-82365",
-  storageBucket: "trading-82365.firebasestorage.app",
-  messagingSenderId: "323423148081",
-  appId: "1:323423148081:web:aaf50bbaccc5354c1e5d10",
-  measurementId: "G-1D80YBNZXF"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "YOUR_API_KEY",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "YOUR_PROJECT_ID.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "YOUR_SENDER_ID",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "YOUR_APP_ID"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Institutional Integrity: Only initialize if keys are valid
+const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
 
-// Helper function to store new user details into Firestore Database
-export async function syncUserToFirebase(user: { id: string | number; email: string; firstName?: string; lastName?: string }) {
+let app: any = null;
+let auth: any = { onAuthStateChanged: () => () => {} }; // Dummy for local mode
+let googleProvider: any = null;
+
+if (isConfigured) {
   try {
-    const userRef = doc(db, "users", String(user.id));
-    await setDoc(userRef, {
-      email: user.email,
-      firstName: user.firstName || "",
-      lastName: user.lastName || "",
-      createdAt: serverTimestamp(),
-      balance: 0 // initial balance
-    }, { merge: true });
-    console.log("Firebase user synced!");
-  } catch (err) {
-    console.error("Firebase sync error:", err);
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+  } catch (e) {
+    console.warn("[Auth] Firebase initialization skipped: using local engine fallback.");
   }
+} else {
+  // Silent Standby: No console error pings to googleapis.com
+  (window as any).__FIREBASE_DISABLED__ = true;
 }
 
-// Helper function to store deposit or withdraw amount details
-export async function recordTransactionToFirebase(userId: string | number, type: "deposit" | "withdraw", amount: number) {
-  try {
-    const transactionRef = collection(db, "users", String(userId), "transactions");
-    await addDoc(transactionRef, {
-      type,
-      amount,
-      timestamp: serverTimestamp()
-    });
-    console.log(`Firebase transaction (${type}) recorded!`);
-  } catch (err) {
-    console.error("Firebase transaction error:", err);
-  }
-}
-
-export { app, auth, db };
+export { app, auth, googleProvider };
+export { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword };
+export default app;

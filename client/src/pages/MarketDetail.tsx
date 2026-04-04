@@ -33,6 +33,7 @@ import { calculatePnL } from "@/lib/pnl";
 import type { CandlePrediction } from "@/lib/candle-predictor";
 import { useAiCredits } from "@/hooks/useAiCredits";
 import { AiPaymentModal } from "@/components/AiPaymentModal";
+import { useAuth } from "@/hooks/use-auth";
 
 // Lazy-load heavy strategy panel
 const StrategyPanel = lazy(() => import("@/components/StrategyPanel"));
@@ -117,6 +118,7 @@ export default function MarketDetail() {
   const [, params] = useRoute("/app/markets/:id");
   const id = params?.id ? Number(params.id) : undefined;
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const instrumentQuery = useInstrumentDetail(id);
   const data = instrumentQuery.data;
@@ -573,12 +575,13 @@ export default function MarketDetail() {
     const loadData = async () => {
       let baseData: any[] = [];
 
-      if (baseData.length === 0 && (instrument?.exchange === "BINANCE" || instrument?.symbol === "XAUUSD" || instrument?.assetClass === "CRYPTO")) {
+      if (baseData.length === 0 && instrument?.exchange === "BINANCE" && instrument?.symbol !== "XAUUSD") {
         try {
-          // Use PAXGUSDT proxy for perfectly real XAUUSD charting without mock variation
-          const binanceSymbol = instrument?.symbol === "XAUUSD" ? "PAXGUSDT" : instrument?.symbol;
+          const binanceSymbol = instrument.symbol;
+          // Binance does not support 2m or 3m directly, map them to 1m for historical seed
+          const fetchInterval = (interval === "2m" || interval === "3m") ? "1m" : interval;
           const res = await fetch(
-            `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${interval}&limit=1000`,
+            `https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${fetchInterval}&limit=1000`,
             { signal: abortCtrl.signal }
           );
           if (res.ok) {
@@ -600,7 +603,8 @@ export default function MarketDetail() {
         // Twelve Data API Integration for Forex, Stocks, and Commodities
         try {
           let tdInt = interval;
-          if (interval.endsWith("m")) tdInt = interval + "in";
+          if (interval === "2m" || interval === "3m") tdInt = "1min";
+          else if (interval.endsWith("m")) tdInt = interval + "in";
           else if (interval === "1d") tdInt = "1day";
           else if (interval === "1w") tdInt = "1week";
           else if (interval === "1M") tdInt = "1month";
@@ -847,9 +851,9 @@ export default function MarketDetail() {
       }, 100);
 
         // Connect to Live API Data for precise targets
-      if (isActive && (instrument?.exchange === "BINANCE" || instrument?.symbol === "XAUUSD")) {
+      if (isActive && instrument?.exchange === "BINANCE" && instrument?.symbol !== "XAUUSD") {
         try {
-          const wsSymbol = instrument?.symbol === "XAUUSD" ? "paxgusdt" : instrument.symbol.toLowerCase();
+          const wsSymbol = instrument.symbol.toLowerCase();
           ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
           ws.onerror = (e) => { console.error("Binance WS Drop:", e); };
           ws.onmessage = (ev) => {
@@ -1165,7 +1169,15 @@ export default function MarketDetail() {
           <div className="p-4 border-b border-border/20">
             {/* Amount Input */}
             <div className="mb-4">
-              <label className="text-[11px] font-bold text-muted-foreground uppercase mb-1.5 block">Investment Amount ($)</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase block">Investment Amount ($)</label>
+                <div className={cn(
+                  "text-[10px] font-black px-2 py-0.5 rounded flex items-center gap-1 uppercase tracking-tighter",
+                  user?.tradeMode === "REAL" ? "bg-primary/10 text-primary" : "bg-violet-500/10 text-violet-400"
+                )}>
+                  {user?.tradeMode ?? "DEMO"}: <span>${user?.tradeMode === "REAL" ? (user?.walletBalance || "0.00") : (user?.demoBalance || "10000.00")}</span>
+                </div>
+              </div>
               <div className="flex bg-[#232936] rounded-xl overflow-hidden border border-border/10 focus-within:border-primary/50 transition-colors">
                 <button onClick={() => setTradeAmount(Math.max(1, tradeAmount - 10))} className="w-10 hover:bg-white/5 flex items-center justify-center text-muted-foreground"><MinusCircle className="w-4 h-4" /></button>
                 <input

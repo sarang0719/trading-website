@@ -150,9 +150,37 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub as string;
       const input = api.timeTrades.create.input.parse(req.body);
-      
-      const order = await storage.createTimeBasedOrder(userId, input as any);
-      res.status(201).json(order);
+
+      const user = await storage.getUser(userId);
+      const amountStr = input.amount as unknown as string;
+      const amount = parseFloat(amountStr);
+      const mode = user?.tradeMode ?? "DEMO";
+
+      if (mode === "REAL") {
+        // Real mode: deduct from realBalance
+        if (!user || parseFloat(user.walletBalance as string) < amount) {
+          return res.status(400).json({ message: "Insufficient Real Wallet Balance. Deposit funds to trade real markets!" });
+        }
+        await storage.updateWalletBalance(userId, -amount);
+        const order = await storage.createTimeBasedOrder(userId, input as any);
+        await storage.createWalletTransaction({
+          userId, type: "TRADE_DEDUCTION", amount: String(amount),
+          status: "SUCCESS", referenceId: String(order.id), mode: "REAL"
+        } as any);
+        res.status(201).json(order);
+      } else {
+        // Demo mode: deduct from demoBalance
+        if (!user || parseFloat(user.demoBalance as string) < amount) {
+          return res.status(400).json({ message: "Insufficient Demo Balance. Reset demo account to get $10,000 again!" });
+        }
+        await storage.updateDemoBalance(userId, -amount);
+        const order = await storage.createTimeBasedOrder(userId, input as any);
+        await storage.createWalletTransaction({
+          userId, type: "TRADE_DEDUCTION", amount: String(amount),
+          status: "SUCCESS", referenceId: String(order.id), mode: "DEMO"
+        } as any);
+        res.status(201).json(order);
+      }
     } catch (err: any) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({
@@ -160,7 +188,6 @@ export async function registerRoutes(
           field: err.errors[0]?.path?.join("."),
         });
       }
-      // Return 400 for Risk Management or other custom errors
       return res.status(400).json({ message: err.message || "Invalid request" });
     }
   });
@@ -168,6 +195,161 @@ export async function registerRoutes(
   app.get(api.market.news.path, async (_req, res) => {
     const news = await storage.getNews();
     res.json(news);
+  });
+
+  // ──────────────────────────────────────────────
+  // REAL-MONEY + DEMO WALLET SYSTEM
+  // ──────────────────────────────────────────────
+
+  // GET wallet info: real balance, demo balance, current mode
+  app.get("/api/wallet/info", isAuthenticated, async (req: any, res) => {
+    try {
+      const info = await storage.getWalletInfo(req.user.claims.sub as string);
+      res.json(info ?? { realBalance: "0.00", demoBalance: "10000.00", tradeMode: "DEMO" });
+    } catch { res.status(500).json({ realBalance: "0.00", demoBalance: "10000.00", tradeMode: "DEMO" }); }
+  });
+
+  // Legacy: keep /api/wallet for backward compat
+  app.get("/api/wallet", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub as string);
+      res.json({ balance: user?.walletBalance || "0.00" });
+    } catch { res.status(500).json({ balance: "0.00" }); }
+  });
+
+  app.get("/api/wallet/transactions", isAuthenticated, async (req: any, res) => {
+    try {
+      const txs = await storage.getWalletTransactions(req.user.claims.sub as string);
+      res.json(txs);
+    } catch { res.status(500).json([]); }
+  });
+
+  // Switch trade mode: DEMO <-> REAL
+  app.post("/api/wallet/mode", isAuthenticated, async (req: any, res) => {
+    try {
+      const { mode } = z.object({ mode: z.enum(["DEMO", "REAL"]) }).parse(req.body);
+      const userId = req.user.claims.sub as string;
+      const updated = await storage.setTradeMode(userId, mode);
+      return res.json({ tradeMode: updated.tradeMode, realBalance: updated.walletBalance, demoBalance: updated.demoBalance });
+    } catch (e: any) { return res.status(400).json({ message: e.message }); }
+  });
+
+  // Reset demo account back to $10,000
+  app.post("/api/wallet/demo/reset", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const updated = await storage.resetDemoBalance(userId);
+      await storage.createWalletTransaction({
+        userId, type: "DEMO_RESET" as any, amount: "10000.00",
+        status: "SUCCESS", mode: "DEMO"
+      } as any);
+      return res.json({ demoBalance: updated.demoBalance, message: "Demo balance reset to $10,000" });
+    } catch (e: any) { return res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/wallet/withdraw", isAuthenticated, async (req: any, res) => {
+    try {
+      const { amount } = z.object({ amount: z.number().min(10) }).parse(req.body);
+      const userId = req.user.claims.sub as string;
+      const user = await storage.getUser(userId);
+      if (!user || parseFloat(user.walletBalance as string) < amount) {
+        return res.status(400).json({ message: "Insufficient balance" });
+      }
+      
+      const updatedUser = await storage.updateWalletBalance(userId, -amount);
+      const tx = await storage.createWalletTransaction({
+        userId, type: "WITHDRAW", amount: String(amount), status: "SUCCESS", mode: "REAL"
+      } as any);
+
+      return res.json({ message: "Withdrawal successful", transaction: tx, newBalance: updatedUser.walletBalance });
+    } catch (e: any) { return res.status(400).json({ message: e.message }); }
+  });
+
+  app.post("/api/wallet/deposit/create-order", isAuthenticated, async (req: any, res) => {
+    try {
+      const { amount } = z.object({ amount: z.number().min(50) }).parse(req.body);
+      const Razorpay = (await import("razorpay")).default;
+      const rzp = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp",
+        key_secret: process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d"
+      });
+      const order = await rzp.orders.create({
+        amount: Math.round(amount * 100), currency: "INR",
+        notes: { userId: req.user.claims.sub, type: "WALLET_DEPOSIT" }
+      });
+      return res.json({ orderId: order.id, amount: amount * 100, currency: "INR", keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp" });
+    } catch (e:any) { return res.status(500).json({ message: e.message }); }
+  });
+
+  app.post("/api/wallet/deposit/verify", isAuthenticated, async (req: any, res) => {
+    try {
+       const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
+       const crypto = await import("crypto");
+       const secret = process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d";
+       const expected = crypto.createHmac("sha256", secret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+       if (expected !== razorpay_signature) return res.status(400).json({ message: "Signature mismatch" });
+
+       const userId = req.user.claims.sub as string;
+       // Check idempotency: don't double-credit same payment
+       const existing = await storage.getWalletTransactions(userId);
+       if (existing.some(t => t.referenceId === razorpay_payment_id)) {
+         return res.status(409).json({ message: "Payment already processed" });
+       }
+
+       const updatedUser = await storage.updateWalletBalance(userId, amount);
+       await storage.createWalletTransaction({
+         userId, type: "DEPOSIT", amount: String(amount), status: "SUCCESS",
+         referenceId: razorpay_payment_id, mode: "REAL"
+       } as any);
+
+       res.json({ success: true, newBalance: updatedUser.walletBalance });
+    } catch (e:any) { return res.status(500).json({ message: e.message }); }
+  });
+
+  // Razorpay Webhook — auto verify and credit wallet
+  app.post("/api/razorpay/webhook", async (req: any, res) => {
+    try {
+      const crypto = await import("crypto");
+      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "";
+      const signature = req.headers["x-razorpay-signature"] as string;
+
+      if (webhookSecret) {
+        const body = JSON.stringify(req.body);
+        const expected = crypto.createHmac("sha256", webhookSecret).update(body).digest("hex");
+        if (expected !== signature) {
+          return res.status(400).json({ message: "Invalid webhook signature" });
+        }
+      }
+
+      const event = req.body;
+      if (event.event === "payment.captured") {
+        const payment = event.payload?.payment?.entity;
+        if (!payment) return res.status(200).json({ ok: true });
+
+        const userId = payment.notes?.userId;
+        const type = payment.notes?.type;
+        if (!userId || type !== "WALLET_DEPOSIT") return res.status(200).json({ ok: true });
+
+        // De-dupe: check if already processed
+        const existing = await storage.getWalletTransactions(userId);
+        if (existing.some(t => t.referenceId === payment.id)) {
+          return res.status(200).json({ ok: true, message: "Already processed" });
+        }
+
+        const amountInRupees = payment.amount / 100;
+        await storage.updateWalletBalance(userId, amountInRupees);
+        await storage.createWalletTransaction({
+          userId, type: "DEPOSIT", amount: String(amountInRupees),
+          status: "SUCCESS", referenceId: payment.id, mode: "REAL"
+        } as any);
+
+        console.log(`[Webhook] Credited ₹${amountInRupees} to user ${userId}`);
+      }
+      return res.status(200).json({ ok: true });
+    } catch (e: any) {
+      console.error("[Webhook] Error:", e.message);
+      return res.status(500).json({ message: e.message });
+    }
   });
 
   // ──────────────────────────────────────────────
@@ -257,15 +439,15 @@ export async function registerRoutes(
       if (!plan) return res.status(400).json({ message: "Invalid plan" });
       const Razorpay = (await import("razorpay")).default;
       const rzp = new Razorpay({
-        key_id:    process.env.RAZORPAY_KEY_ID    || "rzp_test_placeholder",
-        key_secret: process.env.RAZORPAY_KEY_SECRET || "placeholder_secret",
+        key_id:    process.env.RAZORPAY_KEY_ID    || "rzp_test_SYjafmuTvifatp",
+        key_secret: process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d",
       });
       const order = await rzp.orders.create({
         amount: plan.amountPaise, currency: "INR",
         notes: { planId, userId: req.user.claims.sub },
       });
       return res.json({ orderId: order.id, amount: plan.amountPaise, currency: "INR",
-        keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_placeholder",
+        keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp",
         planLabel: plan.label, credits: plan.credits });
     } catch (err: any) {
       return res.status(500).json({ message: err.message || "Failed to create order" });
@@ -278,7 +460,7 @@ export async function registerRoutes(
         z.object({ razorpay_order_id: z.string(), razorpay_payment_id: z.string(),
           razorpay_signature: z.string(), planId: z.string() }).parse(req.body);
       const crypto = await import("crypto");
-      const secret = process.env.RAZORPAY_KEY_SECRET || "placeholder_secret";
+      const secret = process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d";
       const expected = crypto.createHmac("sha256", secret)
         .update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
       if (expected !== razorpay_signature)
