@@ -45,13 +45,23 @@ function initDb() {
   }
 }
 
-// Proxies for backward compatibility with full type safety
+// Proxies for backward compatibility with full type safety and robust 'this' binding
 export const db = new Proxy({}, {
-  get: (_, prop) => getDb()[prop]
+  get: (target, prop) => {
+    const instance = getDb();
+    if (!instance) return undefined;
+    const value = instance[prop];
+    return typeof value === 'function' ? value.bind(instance) : value;
+  }
 }) as ReturnType<typeof drizzleRemote>;
 
 export const client = new Proxy({}, {
-  get: (_, prop) => getClient()[prop]
+  get: (target, prop) => {
+    const instance = getClient();
+    if (!instance) return undefined;
+    const value = instance[prop];
+    return typeof value === 'function' ? value.bind(instance) : value;
+  }
 }) as pg.Pool;
 
 export async function runMigrations() {
