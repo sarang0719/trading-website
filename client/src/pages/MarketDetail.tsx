@@ -35,9 +35,7 @@ import type { CandlePrediction } from "@/lib/candle-predictor";
 import { useAiCredits } from "@/hooks/useAiCredits";
 import { AiPaymentModal } from "@/components/AiPaymentModal";
 import { useAuth } from "@/hooks/use-auth";
-
-// Lazy-load heavy strategy panel
-const StrategyPanel = lazy(() => import("@/components/StrategyPanel"));
+import StrategyPanel from "@/components/StrategyPanel";
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 
