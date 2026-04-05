@@ -131,9 +131,13 @@
     "drizzle-kit": {
       "@esbuild-kit/esm-loader": "npm:tsx@^4.20.4"
     },
-    "rimraf": "^4.0.0",
-    "glob": "^8.0.0",
-    "scmp": "2.1.0"
+    "rimraf": "^5.0.0",
+    "glob": "^10.0.0",
+    "tar": "^7.0.0",
+    "inflight": "npm:lru-cache@^10.0.0",
+    "npmlog": "^7.0.0",
+    "gauge": "^5.0.0",
+    "are-we-there-yet": "^4.0.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
