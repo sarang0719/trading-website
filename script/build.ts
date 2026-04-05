@@ -56,13 +56,10 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    minifyIdentifiers: true,
-    minifySyntax: true,
-    minifyWhitespace: true,
     treeShaking: true,
     legalComments: "none",
     external: externals,
-    logLevel: "silent",
+    logLevel: "error",
   });
 
   // Also include api/index.js for Vercel backwards compatibility
