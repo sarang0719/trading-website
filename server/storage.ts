@@ -53,6 +53,10 @@ function num(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function log(message: string) {
+  console.log(`${new Date().toLocaleTimeString()} [storage] ${message}`);
+}
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -657,110 +661,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seed(): Promise<void> {
-    // Remove outdated PAXG trackers to keep the platform professional
-    await db.delete(instruments).where(or(eq(instruments.symbol, "PAXGUSDT"), eq(instruments.symbol, "PAXG/USDT")));
+    // Institutional Speed Guard: Skip seeding if already initialized to save RAM
+    const [count] = await db.select({ count: sql<number>`count(*)::int` }).from(instruments);
+    if (count.count > 10) return;
+
+    log("Seeding institutional market data [Low-Memory Mode]...");
 
     const seededInstruments: Omit<Instrument, "id">[] = [
-      // Top Cryptos mapped exactly to Binance websocket identifiers
+      // CORE MARKETS ONLY (Preserves RAM on Free-Tier Hosting)
       { symbol: "BTCUSDT",  exchange: "BINANCE", name: "Bitcoin",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/btc@2x.png" },
       { symbol: "ETHUSDT",  exchange: "BINANCE", name: "Ethereum",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/eth@2x.png" },
-      { symbol: "BNBUSDT",  exchange: "BINANCE", name: "BNB",        assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/bnb@2x.png" },
       { symbol: "SOLUSDT",  exchange: "BINANCE", name: "Solana",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/sol@2x.png" },
-      { symbol: "XRPUSDT",  exchange: "BINANCE", name: "XRP",        assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/xrp@2x.png" },
-      { symbol: "DOGEUSDT", exchange: "BINANCE", name: "Dogecoin",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/doge@2x.png" },
-      { symbol: "ADAUSDT",  exchange: "BINANCE", name: "Cardano",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ada@2x.png" },
-      { symbol: "AVAXUSDT", exchange: "BINANCE", name: "Avalanche",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/avax@2x.png" },
-      { symbol: "LINKUSDT", exchange: "BINANCE", name: "Chainlink",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/link@2x.png" },
-      { symbol: "DOTUSDT",  exchange: "BINANCE", name: "Polkadot",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/dot@2x.png" },
-      { symbol: "MATICUSDT",exchange: "BINANCE", name: "Polygon",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/matic@2x.png" },
-      { symbol: "SHIBUSDT", exchange: "BINANCE", name: "Shiba Inu",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/shib@2x.png" },
-      { symbol: "TRXUSDT",  exchange: "BINANCE", name: "TRON",       assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/trx@2x.png" },
-      { symbol: "LTCUSDT",  exchange: "BINANCE", name: "Litecoin",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ltc@2x.png" },
-      { symbol: "BCHUSDT",  exchange: "BINANCE", name: "Bitcoin Cash",assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/bch@2x.png" },
-      { symbol: "NEARUSDT", exchange: "BINANCE", name: "NEAR Protocol",assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/near@2x.png" },
-      { symbol: "ATOMUSDT", exchange: "BINANCE", name: "Cosmos",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/atom@2x.png" },
-      { symbol: "UNIUSDT",  exchange: "BINANCE", name: "Uniswap",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/uni@2x.png" },
-      { symbol: "APTUSDT",  exchange: "BINANCE", name: "Aptos",      assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/apt@2x.png" },
-      { symbol: "LDOUSDT",  exchange: "BINANCE", name: "Lido DAO",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ldo@2x.png" },
-      { symbol: "ARBUSDT",  exchange: "BINANCE", name: "Arbitrum",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: null },
-      { symbol: "INJUSDT",  exchange: "BINANCE", name: "Injective",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/inj@2x.png" },
-      { symbol: "RNDRUSDT", exchange: "BINANCE", name: "Render",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/rndr@2x.png" },
-      { symbol: "OPUSDT",   exchange: "BINANCE", name: "Optimism",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/op@2x.png" },
-      { symbol: "FILUSDT",  exchange: "BINANCE", name: "Filecoin",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/fil@2x.png" },
-      { symbol: "STXUSDT",  exchange: "BINANCE", name: "Stacks",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/stx@2x.png" },
-      { symbol: "IMXUSDT",  exchange: "BINANCE", name: "Immutable",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/imx@2x.png" },
-      { symbol: "VETUSDT",  exchange: "BINANCE", name: "VeChain",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/vet@2x.png" },
-      { symbol: "GRTUSDT",  exchange: "BINANCE", name: "The Graph",  assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/grt@2x.png" },
-      { symbol: "THETAUSDT",exchange: "BINANCE", name: "Theta",      assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/theta@2x.png" },
-      { symbol: "XTZUSDT",  exchange: "BINANCE", name: "Tezos",      assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/xtz@2x.png" },
-      { symbol: "EOSUSDT",  exchange: "BINANCE", name: "EOS",        assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/eos@2x.png" },
-      { symbol: "AAVEUSDT", exchange: "BINANCE", name: "Aave",       assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/aave@2x.png" },
-      { symbol: "ALGOUSDT", exchange: "BINANCE", name: "Algorand",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/algo@2x.png" },
-      { symbol: "FTMUSDT",  exchange: "BINANCE", name: "Fantom",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ftm@2x.png" },
-      
-      // Newly Requested Pairs
-      // Forex
-      { symbol: "XAUUSD", exchange: "FOREX", name: "Gold (Spot)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "XAGUSD", exchange: "FOREX", name: "Silver (Spot)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "USDPKR", exchange: "FOREX", name: "US Dollar vs Pakistani Rupee", assetClass: "FOREX" as any, currency: "USD", country: "PK", isActive: true, imageUrl: null },
-      { symbol: "USDINR", exchange: "FOREX", name: "US Dollar vs Indian Rupee", assetClass: "FOREX" as any, currency: "USD", country: "IN", isActive: true, imageUrl: null },
-      { symbol: "CADCHF", exchange: "FOREX", name: "Canadian Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CAD", country: "CH", isActive: true, imageUrl: null },
-      { symbol: "EURUSD", exchange: "FOREX", name: "Euro vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "USDJPY", exchange: "FOREX", name: "US Dollar vs Yen", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "GBPUSD", exchange: "FOREX", name: "British Pound vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "AUDUSD", exchange: "FOREX", name: "Aussie Dollar vs US Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "USDCHF", exchange: "FOREX", name: "US Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "EURJPY", exchange: "FOREX", name: "Euro vs Yen", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-
-
-      // Stocks
-      { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "TSLA", exchange: "NASDAQ", name: "Tesla Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "AMZN", exchange: "NASDAQ", name: "Amazon", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "GOOGL", exchange: "NASDAQ", name: "Alphabet (Google)", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-
-      // OTC
-      { symbol: "EURUSD-OTC", exchange: "OTC", name: "EUR/USD (OTC)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "BTCUSD-OTC", exchange: "OTC", name: "BTC/USDT (OTC)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "USDJPY-OTC", exchange: "OTC", name: "USD/JPY (OTC)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "XAUUSD",   exchange: "FOREX",   name: "Gold (Spot)", assetClass: "FOREX" as any,  currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "AAPL",     exchange: "NASDAQ",  name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "EURUSD",   exchange: "FOREX",   name: "Euro vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
     ];
 
     for (const inst of seededInstruments) {
       const existing = await db.select().from(instruments).where(eq(instruments.symbol, inst.symbol));
       if (existing.length === 0) {
         const [inserted] = await db.insert(instruments).values(inst as any).returning();
-
         const base = inserted.assetClass === "CRYPTO" ? 10000 : 150;
         const price = base + Math.random() * base * 0.2;
-        const changeAbs = (Math.random() - 0.5) * base * 0.05;
-        const changePct = (changeAbs / price) * 100;
-        const sparkline = Array.from({ length: 20 }, () => (price * (0.95 + Math.random() * 0.1)).toString());
-
         await db.insert(latestPrices).values({
           instrumentId: inserted.id,
           asOf: new Date(),
           price: String(price),
-          changeAbs: String(changeAbs),
-          changePct: String(changePct),
-          sparkline,
+          changeAbs: "0.00",
+          changePct: "0.00",
+          sparkline: [String(price)],
         } as any);
       }
     }
 
-    await db.insert(newsArticles).values([
-      {
-        source: "Market Brief",
-        title: "BTC Hits New High Amid Institutional Inflow",
-        url: "https://example.com/btc-news",
-        publishedAt: new Date(),
-        summary: "Bitcoin price action shows strength as more ETFs go live.",
-        imageUrl: null,
-        tags: ["crypto", "btc"],
-      },
-    ] as any);
-
-    // Auto-create permanent developer account to persist across SQLite memory resets
+    // Auto-create permanent developer account
     const existingUser = await db.select().from(users).where(eq(users.email, "saran123@gmail.com"));
     if (existingUser.length === 0) {
       const { hashPassword } = await import("./auth");
@@ -772,7 +706,6 @@ export class DatabaseStorage implements IStorage {
         autoTradeEnabled: true
       }).returning();
       
-      // Seed a default portfolio
       await db.insert(portfolios).values({
         userId: inserted.id,
         name: "Main Portfolio",
