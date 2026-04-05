@@ -62,12 +62,24 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  const { runMigrations } = await import("./db");
-  await runMigrations();
-  startBackgroundTasks();
-  startAiBotEngine();
+  try {
+    log(`Initializing Institutional AI Trading Engine...`);
+    const { runMigrations } = await import("./db");
+    await runMigrations();
+    startBackgroundTasks();
+    startAiBotEngine();
 
-  await registerRoutes(httpServer, app);
+    await registerRoutes(httpServer, app);
+  } catch (error: any) {
+    console.error(`[Critical Error] Initialization failed:`, error);
+    // Continue starting to allow serving static error-handling or health check routes
+    app.all("/api/*", (_req, res) => {
+      res.status(500).json({ 
+        message: "Initialization Failed", 
+        error: process.env.NODE_ENV === "production" ? undefined : error.message 
+      });
+    });
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

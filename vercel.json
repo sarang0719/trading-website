@@ -1,5 +1,12 @@
 {
   "version": 2,
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "dist/**",
+      "memory": 1024,
+      "maxDuration": 15
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
