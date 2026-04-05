@@ -21,8 +21,12 @@ if (isProduction) {
   });
   dbInstance = drizzleRemote(clientInstance, { schema });
 } else {
-  // DEVELOPMENT: PGlite for local testing
-  console.log("[DB] Connecting to Local PGlite...");
+  // DEVELOPMENT/EMERGENCY: PGlite for local testing
+  if (process.env.NODE_ENV === "production") {
+    console.warn("[DB] WARNING: No DATABASE_URL detected in production. Using ephemeral PGlite.");
+  } else {
+    console.log("[DB] Connecting to Local PGlite...");
+  }
   const { PGlite } = require("@electric-sql/pglite");
   const { drizzle } = require("drizzle-orm/pglite");
   clientInstance = new PGlite();

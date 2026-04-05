@@ -66,13 +66,9 @@ app.use((req, res, next) => {
     log(`Initializing Institutional AI Trading Engine...`);
     const { runMigrations } = await import("./db");
     
-    // Run schema synchronization if database connection is available
-    if (process.env.DATABASE_URL) {
-      log("[DB] Database connection detected: Synchronizing institutional schema...");
-      await runMigrations();
-    } else {
-      log("[DB] No DATABASE_URL detected: Skipping schema synchronization.");
-    }
+    // Universal schema synchronization for maximum boot resilience
+    log("Synchronizing institutional database schema...");
+    await runMigrations();
 
     startBackgroundTasks();
     startAiBotEngine();
