@@ -155,8 +155,12 @@ export function startBackgroundTasks() {
     return line;
   }
 
+  let isBinanceGeoBlocked = false;
+  
   // 1. Setup Binance WebSocket for Crypto
   function setupBinanceWebsocket() {
+    if (isBinanceGeoBlocked) return; // Shield: don't retry if definitively geo-blocked
+
     const ws = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
 
     ws.on("open", async () => {
@@ -205,12 +209,14 @@ export function startBackgroundTasks() {
     });
 
     ws.on("error", (err) => {
-      console.error("Binance WS error:", err);
+      // Institutional Silence: Skip logging 451 geo-blocking as we have simulation fallbacks
       if (err.message.includes("451")) {
-         console.warn("[Binance Security] Geo-block detected (451). Transitioning to Simulation Fallback...");
-         // We let the close handler trigger the reconnection, but we mark a flag or simply rely on the simulation loop
+         console.warn("[Binance Connectivity] Switching to Institutional Stealth Fallback (Geo-blocked).");
+         isBinanceGeoBlocked = true;
          ws.terminate();
+         return;
       }
+      console.error("Binance WS error:", err);
     });
   }
 
@@ -220,10 +226,14 @@ export function startBackgroundTasks() {
   setInterval(async () => {
     try {
       const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
-      const stockInstruments = allInstruments.filter(i => i.assetClass !== "CRYPTO");
+      // Absorption Logic: If Binance WS is geoblocked, we absorb Crypto into the polling loop
+      const activeInstruments = allInstruments.filter(i => {
+         if (i.assetClass === "CRYPTO") return isBinanceGeoBlocked;
+         return true;
+      });
 
       let callCount = 0;
-      for (const instrument of stockInstruments) {
+      for (const instrument of activeInstruments) {
         let priceData = null;
 
         if (["US_STOCK", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
