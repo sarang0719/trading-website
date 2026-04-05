@@ -65,7 +65,15 @@ app.use((req, res, next) => {
   try {
     log(`Initializing Institutional AI Trading Engine...`);
     const { runMigrations } = await import("./db");
-    await runMigrations();
+    
+    // Skip synchronous migrations on Vercel to prevent boot timeouts
+    if (!process.env.VERCEL) {
+      log("[DB] Local environment detected: Running sync migrations...");
+      await runMigrations();
+    } else {
+      log("[DB] Vercel environment detected: Skipping sync migrations for boot speed.");
+    }
+
     startBackgroundTasks();
     startAiBotEngine();
 
