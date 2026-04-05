@@ -223,7 +223,7 @@ export class DatabaseStorage implements IStorage {
     .innerJoin(users, eq(withdrawalRequests.userId, users.id))
     .orderBy(desc(withdrawalRequests.createdAt));
 
-    return results.map(r => ({
+    return results.map((r: any) => ({
       ...r.request,
       user: r.user
     }));
@@ -308,7 +308,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(instruments.exchange, instruments.symbol)
       .limit(200);
 
-    return rows.map((r) => ({
+    return rows.map((r: any) => ({
       ...r.instrument,
       price: r.price ?? undefined,
     }));
@@ -372,7 +372,7 @@ export class DatabaseStorage implements IStorage {
 
     return {
       ...wl,
-      items: rows.map((r) => ({
+      items: rows.map((r: any) => ({
         id: r.itemId,
         instrument: r.instrument,
         price: r.price ?? undefined,
@@ -445,7 +445,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(latestPrices, eq(latestPrices.instrumentId, instruments.id))
       .where(eq(holdings.portfolioId, portfolioId));
 
-    const enriched = rows.map((r) => {
+    const enriched = rows.map((r: any) => {
       const qty = num(r.holding.quantity);
       const avg = num(r.holding.avgCost);
       const px = r.price ? num(r.price.price) : 0;
@@ -464,12 +464,12 @@ export class DatabaseStorage implements IStorage {
       };
     });
 
-    const marketValue = enriched.reduce((a, b) => a + b.marketValue, 0);
-    const costValue = enriched.reduce((a, b) => a + b.costValue, 0);
+    const marketValue = enriched.reduce((a: number, b: any) => a + b.marketValue, 0);
+    const costValue = enriched.reduce((a: number, b: any) => a + b.costValue, 0);
     const totalPnl = marketValue - costValue;
     const totalPnlPct = costValue > 0 ? totalPnl / costValue : 0;
 
-    const dayPnl = enriched.reduce((a, b) => {
+    const dayPnl = enriched.reduce((a: number, b: any) => {
       const chg = b.price ? num(b.price.changeAbs) : 0;
       const qty = num(b.holding.quantity);
       return a + chg * qty;

@@ -45,14 +45,14 @@ function initDb() {
   }
 }
 
-// Proxies for backward compatibility
+// Proxies for backward compatibility with full type safety
 export const db = new Proxy({}, {
   get: (_, prop) => getDb()[prop]
-});
+}) as ReturnType<typeof drizzleRemote>;
 
 export const client = new Proxy({}, {
   get: (_, prop) => getClient()[prop]
-});
+}) as pg.Pool;
 
 export async function runMigrations() {
   const c = getClient();

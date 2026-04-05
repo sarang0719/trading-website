@@ -99,7 +99,7 @@ export function startBackgroundTasks() {
   async function refreshCryptoMap() {
     const allInstruments = await db.select().from(instruments).where(eq(instruments.assetClass, "CRYPTO"));
     const map = new Map<string, any>();
-    allInstruments.forEach(i => map.set(i.symbol, i));
+    allInstruments.forEach((i: any) => map.set(i.symbol, i));
     cryptoMap = map;
   }
 
@@ -319,7 +319,7 @@ export function startBackgroundTasks() {
       console.log("Running initial background api fetch for stocks...");
       (async () => {
         const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
-        const stockInstruments = allInstruments.filter(i => i.assetClass !== "CRYPTO");
+        const stockInstruments = allInstruments.filter((i: any) => i.assetClass !== "CRYPTO");
         let callCount = 0;
         for (const instrument of stockInstruments) {
           let priceData = null;
