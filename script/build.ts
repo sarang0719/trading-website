@@ -51,7 +51,7 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "cjs",
-    outfile: "api/index.js",
+    outfile: "dist/index.cjs",
     define: {
       "process.env.NODE_ENV": '"production"',
     },
@@ -64,6 +64,13 @@ async function buildAll() {
     external: externals,
     logLevel: "silent",
   });
+
+  // Also include api/index.js for Vercel backwards compatibility
+  if (process.env.VERCEL) {
+     const { copyFile, mkdir } = await import("fs/promises");
+     await mkdir("api", { recursive: true });
+     await copyFile("dist/index.cjs", "api/index.js");
+  }
 }
 
 buildAll().catch((err) => {
