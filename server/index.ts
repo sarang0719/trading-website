@@ -66,12 +66,12 @@ app.use((req, res, next) => {
     log(`Initializing Institutional AI Trading Engine...`);
     const { runMigrations } = await import("./db");
     
-    // Skip synchronous migrations on Vercel to prevent boot timeouts
-    if (!process.env.VERCEL) {
-      log("[DB] Local environment detected: Running sync migrations...");
+    // Run schema synchronization if database connection is available
+    if (process.env.DATABASE_URL) {
+      log("[DB] Database connection detected: Synchronizing institutional schema...");
       await runMigrations();
     } else {
-      log("[DB] Vercel environment detected: Skipping sync migrations for boot speed.");
+      log("[DB] No DATABASE_URL detected: Skipping schema synchronization.");
     }
 
     startBackgroundTasks();
