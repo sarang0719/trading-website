@@ -56,8 +56,13 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
+    minifyIdentifiers: true,
+    minifySyntax: true,
+    minifyWhitespace: true,
+    treeShaking: true,
+    legalComments: "none",
     external: externals,
-    logLevel: "info",
+    logLevel: "silent",
   });
 }
 
