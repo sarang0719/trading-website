@@ -63,19 +63,43 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
-    log(`Initializing Institutional AI Trading Engine...`);
-    const { runMigrations } = await import("./db");
+    log(`Initializing Institutional AI Trading Engine [Fast Boot]...`);
     
-    // Universal schema synchronization for maximum boot resilience
-    log("Synchronizing institutional database schema...");
-    await runMigrations();
-
-    startBackgroundTasks();
-    startAiBotEngine();
-
+    // PHASE 1: Immediate API & Static Readiness
     await registerRoutes(httpServer, app);
+    
+    if (process.env.NODE_ENV === "production") {
+      serveStatic(app);
+    } else {
+      const { setupVite } = await import("./vite");
+      await setupVite(httpServer, app);
+    }
+
+    // PHASE 2: Immediate Port Binding (Prevents 502/504 on Render)
+    const port = parseInt(process.env.PORT || "3000", 10);
+    if (!process.env.VERCEL) {
+      httpServer.listen({ port, host: "0.0.0.0" }, () => {
+        log(`serving on port ${port} [Ready for traffic]`);
+      });
+    }
+
+    // PHASE 3: Asynchronous Background Initialization
+    (async () => {
+       try {
+         const { runMigrations } = await import("./db");
+         log("Synchronizing institutional database schema in background...");
+         await runMigrations();
+         
+         startBackgroundTasks();
+         startAiBotEngine();
+         log("Institutional background engines active.");
+       } catch (dbError) {
+         console.error("[Background Init Error]", dbError);
+       }
+    })();
+
   } catch (error: any) {
-    console.error(`[Critical Error] Initialization failed:`, error);
+    console.error(`[Critical Error] Startup failed:`, error);
     // CRITICAL: Always return the error details for structural debugging
     app.all("/api/*", (_req, res) => {
       res.status(500).json({ 
@@ -104,35 +128,9 @@ app.use((req, res, next) => {
     });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
-  }
-
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "3000", 10);
-
-  // Skip listen in Vercel environment (Vercel invokes exported app)
+  // Vercel Export Guard
   if (process.env.VERCEL) {
     log(`Exporting app for Vercel runtime`);
-  } else {
-    httpServer.listen(
-      {
-        port,
-        host: "0.0.0.0",
-      },
-      () => {
-        log(`serving on port ${port}`);
-      },
-    );
   }
 })();
 

@@ -119,18 +119,20 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  app.post("/api/login", passport.authenticate("local"), async (req, res) => {
+  app.post("/api/login", passport.authenticate("local"), (req, res) => {
     const u: any = req.user;
     
-    // Log Activity
+    // Asynchronous Institutional Logging: Return response immediately, log in background
     const ua = req.headers["user-agent"];
     const browser = req.headers["sec-ch-ua"];
-    await storage.logLogin(u.id, {
+    storage.logLogin(u.id, {
       ip: req.ip,
       device: Array.isArray(ua) ? ua[0] : ua || "unknown",
       browser: Array.isArray(browser) ? browser[0] : browser || "standard browser"
-    });
-    await storage.logActivity(u.id, "LOGIN", "Basic email/password login");
+    }).catch(e => console.error("[Background logLogin error]", e));
+    
+    storage.logActivity(u.id, "LOGIN", "Basic email/password login")
+      .catch(e => console.error("[Background logActivity error]", e));
 
     res.status(200).json({
       id: u.id,
