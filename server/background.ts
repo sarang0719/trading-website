@@ -311,13 +311,14 @@ export function startBackgroundTasks() {
               const newChangeAbs = (parseFloat(currentRow.changeAbs as string) || 0) + precisionJitter;
               const newSparkline = await updateCachedSparkline(instrument, newPrice, newChangeAbs);
               
+              const isOpen = isGlobalMarketOpen(instrument.assetClass);
               await db.update(latestPrices)
                 .set({
                   price: newPrice.toFixed(6),
                   changeAbs: newChangeAbs.toFixed(6),
                   sparkline: newSparkline,
                   asOf: new Date(),
-                  isOpen: false
+                  isOpen
                 })
                 .where(eq(latestPrices.instrumentId, instrument.id));
            }
