@@ -9,7 +9,10 @@ import * as schema from "@shared/schema";
 const isProduction = process.env.NODE_ENV === "production" || !!process.env.DATABASE_URL;
 
 export const client = process.env.DATABASE_URL 
-  ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  ? new pg.Pool({ 
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false } // Required for remote cloud Postgres (Neon/Supabase)
+    })
   : new PGlite();
 
 export const db = process.env.DATABASE_URL
