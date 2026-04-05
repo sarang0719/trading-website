@@ -206,6 +206,11 @@ export function startBackgroundTasks() {
 
     ws.on("error", (err) => {
       console.error("Binance WS error:", err);
+      if (err.message.includes("451")) {
+         console.warn("[Binance Security] Geo-block detected (451). Transitioning to Simulation Fallback...");
+         // We let the close handler trigger the reconnection, but we mark a flag or simply rely on the simulation loop
+         ws.terminate();
+      }
     });
   }
 

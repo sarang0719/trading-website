@@ -41,8 +41,11 @@ export async function runMigrations() {
         await clientInstance.exec(sql);
       }
     } catch (e: any) {
-      if (!sql.includes("ALTER TABLE") && !sql.includes("CREATE TYPE")) {
-        console.warn(`[DB Migration Notice] ${e.message}`);
+      // Log all critical schema errors for diagnostics
+      console.error(`[DB Migration Error] FAILED: ${sql.substring(0, 100)}...`);
+      console.error(`[DB Migration Error] Reason: ${e.message}`);
+      if (!sql.includes("CREATE TYPE") && !sql.includes("ALTER TABLE")) {
+         throw e; // Definitive failure for base tables like 'instruments'
       }
     }
   };
