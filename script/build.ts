@@ -55,7 +55,10 @@ async function buildAll() {
     define: {
       "process.env.NODE_ENV": '"production"',
     },
-    minify: true,
+    minify: false,
+    minifyWhitespace: true,
+    minifyIdentifiers: false,
+    minifySyntax: false,
     treeShaking: true,
     legalComments: "none",
     external: externals,
