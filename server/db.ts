@@ -2,73 +2,44 @@ import { drizzle as drizzleRemote } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
 
-// v34.0 BULLETPROOF DATABASE ENGINE
-// Lazy Singleton Pattern for Enterprise Stability
+// v40.0 INSTITUTIONAL DIRECT DATABASE ENGINE
+// Optimized for Vercel Serverless & High-Concurrency
 
-let dbInstance: any = null;
-let clientInstance: any = null;
+const isProduction = process.env.DATABASE_URL && !process.env.DATABASE_URL.includes("localhost");
 
-export function getDb() {
-  if (dbInstance) return dbInstance;
-  initDb();
-  return dbInstance;
+let clientInstance: any;
+let dbInstance: any;
+
+if (isProduction) {
+  // PRODUCTION: Direct Node-Postgres Pool
+  console.log("[DB] Connecting to Production Postgres...");
+  clientInstance = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 15,
+    idleTimeoutMillis: 30000,
+  });
+  dbInstance = drizzleRemote(clientInstance, { schema });
+} else {
+  // DEVELOPMENT: PGlite for local testing
+  console.log("[DB] Connecting to Local PGlite...");
+  const { PGlite } = require("@electric-sql/pglite");
+  const { drizzle } = require("drizzle-orm/pglite");
+  clientInstance = new PGlite();
+  dbInstance = drizzle(clientInstance, { schema });
 }
 
-export function getClient() {
-  if (clientInstance) return clientInstance;
-  initDb();
-  return clientInstance;
-}
-
-function initDb() {
-  if (dbInstance) return;
-
-  if (process.env.DATABASE_URL) {
-    // PRODUCTION: Pure Node-Postgres with SSL
-    console.log("[DB] Initializing Production Postgres Connection...");
-    clientInstance = new pg.Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    });
-    dbInstance = drizzleRemote(clientInstance, { schema });
-  } else {
-    // DEVELOPMENT: Dynamic PGlite initialization
-    console.log("[DB] Initializing Local PGlite for Development...");
-    // Note: In development, we allow synchronous error if PGlite is missing
-    const { PGlite } = require("@electric-sql/pglite");
-    const { drizzle } = require("drizzle-orm/pglite");
-    clientInstance = new PGlite();
-    dbInstance = drizzle(clientInstance, { schema });
-  }
-}
-
-// Proxies for backward compatibility with full type safety and robust 'this' binding
-export const db = new Proxy({}, {
-  get: (target, prop) => {
-    const instance = getDb();
-    if (!instance) return undefined;
-    const value = instance[prop];
-    return typeof value === 'function' ? value.bind(instance) : value;
-  }
-}) as ReturnType<typeof drizzleRemote>;
-
-export const client = new Proxy({}, {
-  get: (target, prop) => {
-    const instance = getClient();
-    if (!instance) return undefined;
-    const value = instance[prop];
-    return typeof value === 'function' ? value.bind(instance) : value;
-  }
-}) as pg.Pool;
+export const db = dbInstance;
+export const client = clientInstance;
 
 export async function runMigrations() {
-  const c = getClient();
   const q = async (sql: string) => {
     try {
-      await c.query(sql);
+      if (clientInstance.query) {
+        await clientInstance.query(sql);
+      } else {
+        await clientInstance.exec(sql);
+      }
     } catch (e: any) {
       if (!sql.includes("ALTER TABLE") && !sql.includes("CREATE TYPE")) {
         console.warn(`[DB Migration Notice] ${e.message}`);
@@ -80,7 +51,6 @@ export async function runMigrations() {
   await q(`CREATE TABLE IF NOT EXISTS sessions (sid varchar PRIMARY KEY, sess jsonb NOT NULL, expire timestamp NOT NULL)`);
   await q(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON sessions(expire)`);
   await q(`CREATE TABLE IF NOT EXISTS users (id varchar PRIMARY KEY DEFAULT gen_random_uuid(), email varchar UNIQUE, password text, first_name varchar, last_name varchar, profile_image_url varchar, firebase_uid varchar UNIQUE, auto_trade_enabled boolean, auto_trade_amount varchar DEFAULT '5.00', free_predictions_used integer NOT NULL DEFAULT 0, paid_credits integer NOT NULL DEFAULT 0, is_blocked boolean DEFAULT false, is_ai_blocked boolean DEFAULT false, created_at timestamp DEFAULT now(), updated_at timestamp DEFAULT now())`);
-  // (Rest of the migrations follow the same pattern)
   await q(`CREATE TABLE IF NOT EXISTS login_history (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, ip varchar, device varchar, browser varchar, created_at timestamp DEFAULT now())`);
   await q(`CREATE TABLE IF NOT EXISTS user_activities (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, action varchar NOT NULL, details text, created_at timestamp DEFAULT now())`);
   await q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'asset_class') THEN CREATE TYPE asset_class AS ENUM ('INDIAN_STOCK','US_STOCK','ETF','MUTUAL_FUND','FOREX','CRYPTO'); END IF; END $$`);
