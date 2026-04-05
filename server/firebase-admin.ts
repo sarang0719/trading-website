@@ -1,28 +1,48 @@
 import admin from "firebase-admin";
 
-// In production, we should provide the path to the service account JSON
-// or initialize via environment variables!
-if (!admin.apps.length) {
-  try {
-    admin.initializeApp({
-      // CREDENTIALS_PATH should point to your downloaded service account key
-      // credential: admin.credential.cert(process.env.GOOGLE_APPLICATION_CREDENTIALS),
-      projectId: process.env.FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
-    });
-    console.log("[Firebase] Admin SDK initialized successfully");
-  } catch (error) {
-    console.error("[Firebase] Admin SDK initialization failed:", error);
+// v42.1 INSTITUTIONAL LAZY FIREBASE ADMIN
+// Optimized for Vercel Serverless to prevent initialization timeouts
+
+let initialized = false;
+
+function ensureInitialized() {
+  if (initialized) return admin;
+  if (admin.apps.length > 0) {
+    initialized = true;
+    return admin;
   }
+
+  // Attempt to initialize with environment variables
+  try {
+     const projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+     
+     if (projectId && projectId !== "YOUR_PROJECT_ID") {
+        console.log(`[Firebase] Initializing Admin SDK for Project: ${projectId}`);
+        admin.initializeApp({
+           projectId,
+           // credential: admin.credential.applicationDefault(),
+        });
+        initialized = true;
+     } else {
+        console.warn("[Firebase] Skipping Admin SDK initialization (No Valid Project ID)");
+     }
+  } catch (error) {
+     console.error("[Firebase] Admin SDK init error:", error);
+  }
+  return admin;
 }
 
-export const firebaseAdmin = admin;
-export const firestore = admin.apps.length ? admin.firestore() : null;
+export const firebaseAdmin = {
+  auth: () => ensureInitialized().auth(),
+  firestore: () => ensureInitialized().firestore(),
+  messaging: () => ensureInitialized().messaging(),
+};
 
-/**
- * Mirror local user data to Cloud Firestore for permanent visibility
- */
+export const firestore = {
+  collection: (path: string) => firebaseAdmin.firestore().collection(path)
+} as any;
+
 export async function syncUserToFirestore(localUser: any) {
-  if (!firestore) return;
   try {
      const docRef = firestore.collection("users").doc(localUser.id);
      await docRef.set({

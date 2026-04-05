@@ -72,11 +72,12 @@ app.use((req, res, next) => {
     await registerRoutes(httpServer, app);
   } catch (error: any) {
     console.error(`[Critical Error] Initialization failed:`, error);
-    // Continue starting to allow serving static error-handling or health check routes
+    // CRITICAL: Always return the error details for structural debugging
     app.all("/api/*", (_req, res) => {
       res.status(500).json({ 
         message: "Initialization Failed", 
-        error: process.env.NODE_ENV === "production" ? undefined : error.message 
+        error: error.message || String(error),
+        stack: error.stack || null
       });
     });
   }
