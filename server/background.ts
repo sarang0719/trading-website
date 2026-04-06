@@ -236,7 +236,25 @@ export function startBackgroundTasks() {
       for (const instrument of activeInstruments) {
         let priceData = null;
 
-        if (["US_STOCK", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
+        if (instrument.symbol === "XAUUSD" || instrument.assetClass === "FOREX") {
+          // Priority: TwelveData for Institutional Gold/Forex
+          try {
+            const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
+            const res = await fetch(`https://api.twelvedata.com/price?symbol=${sym}&apikey=b630be1ed9604a29a35ad8d11a8af18c`);
+            const data = await res.json() as any;
+            if (data && data.price) {
+               priceData = {
+                 price: data.price,
+                 changeAbs: "0.01", // Approximate change if secondary tier
+                 changePct: "0.01"
+               };
+            }
+          } catch (e) {
+            console.error(`TwelveData fetch failed for ${instrument.symbol}`, e);
+          }
+        }
+
+        if (!priceData && ["US_STOCK", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
           callCount++;
           const sym = instrument.assetClass === "INDIAN_STOCK" ? `${instrument.symbol}.BSE` : instrument.symbol;
           try {
@@ -251,23 +269,6 @@ export function startBackgroundTasks() {
             }
           } catch (e) {
             console.error(`Failed to fetch for ${sym}`, e);
-          }
-        } else if (instrument.assetClass === "FOREX") {
-          callCount++;
-          const fromC = instrument.symbol.substring(0, 3);
-          const toC = instrument.symbol.substring(3, 6);
-          try {
-            const res = await fetch(`https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${fromC}&to_currency=${toC}&apikey=${ALPHA_VANTAGE_API_KEY}`);
-            const data = await res.json() as any;
-            if (data && data["Realtime Currency Exchange Rate"]) {
-              priceData = {
-                price: data["Realtime Currency Exchange Rate"]["5. Exchange Rate"],
-                changeAbs: "0",
-                changePct: "0"
-              };
-            }
-          } catch (e) {
-            console.error(`Failed to fetch forex for ${fromC}-${toC}`, e);
           }
         }
 
