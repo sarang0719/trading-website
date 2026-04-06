@@ -681,8 +681,10 @@ export class DatabaseStorage implements IStorage {
       const existing = await db.select().from(instruments).where(eq(instruments.symbol, inst.symbol));
       if (existing.length === 0) {
         const [inserted] = await db.insert(instruments).values(inst as any).returning();
-        const base = inserted.assetClass === "CRYPTO" ? 10000 : 150;
-        const price = base + Math.random() * base * 0.2;
+        const base = inserted.symbol === "BTCUSDT" ? 60000 : 
+                   (inserted.symbol === "XAUUSD" ? 2600 : 
+                   (inserted.assetClass === "CRYPTO" ? 1000 : 150));
+        const price = base + Math.random() * base * 0.1;
         await db.insert(latestPrices).values({
           instrumentId: inserted.id,
           asOf: new Date(),

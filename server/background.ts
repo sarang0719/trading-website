@@ -237,20 +237,31 @@ export function startBackgroundTasks() {
         let priceData = null;
 
         if (instrument.symbol === "XAUUSD" || instrument.assetClass === "FOREX") {
-          // Priority: TwelveData for Institutional Gold/Forex
+          // Priority 1: TwelveData for Institutional Gold/Forex
           try {
             const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
             const res = await fetch(`https://api.twelvedata.com/price?symbol=${sym}&apikey=b630be1ed9604a29a35ad8d11a8af18c`);
             const data = await res.json() as any;
             if (data && data.price) {
-               priceData = {
-                 price: data.price,
-                 changeAbs: "0.01", // Approximate change if secondary tier
-                 changePct: "0.01"
-               };
+               priceData = { price: data.price, changeAbs: "0.01", changePct: "0.01" };
             }
-          } catch (e) {
-            console.error(`TwelveData fetch failed for ${instrument.symbol}`, e);
+          } catch {}
+
+          // Priority 2: Yahoo Finance Fallback (Institutional Reliability)
+          if (!priceData) {
+            try {
+              const sym = instrument.symbol === "XAUUSD" ? "GC=F" : `${instrument.symbol}=X`;
+              const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1m&range=1d`);
+              const data = await res.json() as any;
+              const result = data?.chart?.result?.[0];
+              if (result && result.meta?.regularMarketPrice) {
+                 priceData = {
+                    price: result.meta.regularMarketPrice.toString(),
+                    changeAbs: (result.meta.regularMarketPrice - result.meta.previousClose).toString(),
+                    changePct: (((result.meta.regularMarketPrice - result.meta.previousClose) / result.meta.previousClose) * 100).toString()
+                 };
+              }
+            } catch {}
           }
         }
 
@@ -329,7 +340,7 @@ export function startBackgroundTasks() {
     } catch (e) {
       console.error("Error fetching background info", e);
     }
-  }, 15000); 
+  }, 5000); 
 
   setTimeout(() => {
     try {
