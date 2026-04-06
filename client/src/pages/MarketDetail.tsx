@@ -1183,9 +1183,6 @@ export default function MarketDetail() {
                   isGlobalMarketOpen(instrument.assetClass, instrument.symbol) ? "bg-emerald-400 animate-pulse" : "bg-rose-400"
                 )} />
                 {isGlobalMarketOpen(instrument.assetClass, instrument.symbol) ? "LIVE" : "CLOSED"}
-                {(!isGlobalMarketOpen(instrument.assetClass, instrument.symbol) && instrument.assetClass !== "CRYPTO") && (
-                  <span className="ml-1 opacity-60 lowercase font-medium">Re-opens Sun 22:00 UTC</span>
-                )}
               </div>
             )}
               <span className="font-black text-emerald-300 text-sm tracking-tight drop-shadow-[0_0_12px_rgba(110,231,183,0.3)]">{fmtUsd(displayPrice)}</span>
