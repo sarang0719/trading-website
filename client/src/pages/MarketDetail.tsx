@@ -1149,20 +1149,20 @@ export default function MarketDetail() {
             {/* Spacer + Live price */}
             <div className="flex-1" />
             <div className="flex items-center gap-3 text-xs shrink-0 bg-background/40 px-3 py-1.5 rounded-xl border border-border/10">
-              {priceData && (
-                <div className={cn(
-                  "hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest transition-all",
-                  priceData.isOpen 
-                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]" 
-                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                )}>
-                  <span className={cn("h-1 w-1 rounded-full", priceData.isOpen ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
-                  {priceData.isOpen ? "LIVE" : "CLOSED"}
-                  {!priceData.isOpen && (
-                    <span className="ml-1 opacity-60 lowercase font-medium">Re-opens Sun 22:00 UTC</span>
-                  )}
-                </div>
-              )}
+            {priceData && (
+              <div className={cn(
+                "hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest transition-all",
+                (priceData.isOpen || instrument.assetClass === "CRYPTO")
+                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]" 
+                  : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+              )}>
+                <span className={cn("h-1 w-1 rounded-full", (priceData.isOpen || instrument.assetClass === "CRYPTO") ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
+                {(priceData.isOpen || instrument.assetClass === "CRYPTO") ? "LIVE" : "CLOSED"}
+                {(!priceData.isOpen && instrument.assetClass !== "CRYPTO") && (
+                  <span className="ml-1 opacity-60 lowercase font-medium">Re-opens Sun 22:00 UTC</span>
+                )}
+              </div>
+            )}
               <span className="font-black text-emerald-300 text-sm tracking-tight drop-shadow-[0_0_12px_rgba(110,231,183,0.3)]">{fmtUsd(displayPrice)}</span>
               <span className={cn("font-bold", isUp ? "text-emerald-400" : "text-rose-400")}>
                 {Number(priceData?.changeAbs) >= 0 ? "+" : ""}{Number(priceData?.changeAbs).toFixed(2)} ({fmtPct(Number(priceData?.changePct))})

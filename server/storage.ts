@@ -690,6 +690,7 @@ export class DatabaseStorage implements IStorage {
           changeAbs: "0.00",
           changePct: "0.00",
           sparkline: [String(price)],
+          isOpen: inserted.assetClass === "CRYPTO" // Institutional default for Crypto
         } as any);
       }
     }
