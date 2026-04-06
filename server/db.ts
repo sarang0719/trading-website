@@ -1,6 +1,8 @@
 import { drizzle as drizzleRemote } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle as drizzlePGLite } from "drizzle-orm/pglite";
 
 // v40.0 INSTITUTIONAL DIRECT DATABASE ENGINE
 // Optimized for Vercel Serverless & High-Concurrency
@@ -27,10 +29,8 @@ if (isProduction) {
   } else {
     console.log("[DB] Connecting to Local PGlite...");
   }
-  const { PGlite } = require("@electric-sql/pglite");
-  const { drizzle } = require("drizzle-orm/pglite");
   clientInstance = new PGlite();
-  dbInstance = drizzle(clientInstance, { schema });
+  dbInstance = drizzlePGLite(clientInstance, { schema });
 }
 
 export const db = dbInstance;

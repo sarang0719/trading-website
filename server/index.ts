@@ -65,6 +65,11 @@ app.use((req, res, next) => {
   try {
     log(`Initializing Institutional AI Trading Engine [Fast Boot]...`);
     
+    // PHASE 0: Synchronize institutional database schema
+    const { runMigrations } = await import("./db");
+    log("Synchronizing institutional database schema...");
+    await runMigrations();
+
     // PHASE 1: Immediate API & Static Readiness
     await registerRoutes(httpServer, app);
     
@@ -86,10 +91,6 @@ app.use((req, res, next) => {
     // PHASE 3: Asynchronous Background Initialization
     (async () => {
        try {
-         const { runMigrations } = await import("./db");
-         log("Synchronizing institutional database schema in background...");
-         await runMigrations();
-         
          startBackgroundTasks();
          startAiBotEngine();
          log("Institutional background engines active.");
@@ -111,15 +112,15 @@ app.use((req, res, next) => {
          } catch (syncErr) {
            console.error("[Sync Error]", syncErr);
          }
-       } catch (dbError) {
-         console.error("[Background Init Error]", dbError);
+       } catch (error) {
+         console.error("[Background Init Error]", error);
        }
     })();
 
   } catch (error: any) {
     console.error(`[Critical Error] Startup failed:`, error);
     // CRITICAL: Always return the error details for structural debugging
-    app.all("/api/*", (_req, res) => {
+    app.all("/api/*path", (_req, res) => {
       res.status(500).json({ 
         message: "Initialization Failed", 
         error: error.message || String(error),

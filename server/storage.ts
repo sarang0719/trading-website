@@ -663,28 +663,56 @@ export class DatabaseStorage implements IStorage {
   async seed(): Promise<void> {
     // Institutional Speed Guard: Skip seeding if already initialized to save RAM
     const [count] = await db.select({ count: sql<number>`count(*)::int` }).from(instruments);
-    if (count.count > 10) return;
+    if (count.count > 30) return;
 
-    log("Seeding institutional market data [Low-Memory Mode]...");
+    log("Seeding institutional market data [Comprehensive Mode]...");
 
     const seededInstruments: Omit<Instrument, "id">[] = [
-      // CORE MARKETS ONLY (Preserves RAM on Free-Tier Hosting)
+      // FOREX
+      { symbol: "EURUSD",   exchange: "FOREX",   name: "Euro vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "EU", isActive: true, imageUrl: null },
+      { symbol: "GBPUSD",   exchange: "FOREX",   name: "British Pound vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "UK", isActive: true, imageUrl: null },
+      { symbol: "USDJPY",   exchange: "FOREX",   name: "US Dollar vs Yen", assetClass: "FOREX" as any, currency: "JPY", country: "JP", isActive: true, imageUrl: null },
+      { symbol: "AUDUSD",   exchange: "FOREX",   name: "Aussie Dollar vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "AU", isActive: true, imageUrl: null },
+      { symbol: "USDCHF",   exchange: "FOREX",   name: "US Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CHF", country: "CH", isActive: true, imageUrl: null },
+      { symbol: "GBPJPY",   exchange: "FOREX",   name: "Pound vs Yen", assetClass: "FOREX" as any, currency: "JPY", country: "JP", isActive: true, imageUrl: null },
+      { symbol: "USDCAD",   exchange: "FOREX",   name: "Dollar vs Canadian Dollar", assetClass: "FOREX" as any, currency: "CAD", country: "CA", isActive: true, imageUrl: null },
+      
+      // CRYPTO
       { symbol: "BTCUSDT",  exchange: "BINANCE", name: "Bitcoin",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/btc@2x.png" },
       { symbol: "ETHUSDT",  exchange: "BINANCE", name: "Ethereum",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/eth@2x.png" },
       { symbol: "SOLUSDT",  exchange: "BINANCE", name: "Solana",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/sol@2x.png" },
+      { symbol: "BNBUSDT",  exchange: "BINANCE", name: "Binance Coin", assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/bnb@2x.png" },
+      { symbol: "XRPUSDT",  exchange: "BINANCE", name: "Ripple",     assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/xrp@2x.png" },
+      { symbol: "ADAUSDT",  exchange: "BINANCE", name: "Cardano",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/ada@2x.png" },
+      { symbol: "DOGEUSDT", exchange: "BINANCE", name: "Dogecoin",   assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/doge@2x.png" },
+      
+      // COMMODITIES
       { symbol: "XAUUSD",   exchange: "FOREX",   name: "Gold (Spot)", assetClass: "FOREX" as any,  currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "XAGUSD",   exchange: "FOREX",   name: "Silver (Spot)", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "WTIUSD",   exchange: "FOREX",   name: "WTI Crude Oil", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      
+      // STOCKS
       { symbol: "AAPL",     exchange: "NASDAQ",  name: "Apple Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
-      { symbol: "EURUSD",   exchange: "FOREX",   name: "Euro vs Dollar", assetClass: "FOREX" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "TSLA",     exchange: "NASDAQ",  name: "Tesla Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "NVDA",     exchange: "NASDAQ",  name: "NVIDIA Corp.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "AMZN",     exchange: "NASDAQ",  name: "Amazon.com Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "MSFT",     exchange: "NASDAQ",  name: "Microsoft Corporation", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "GOOGL",    exchange: "NASDAQ",  name: "Alphabet Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "META",     exchange: "NASDAQ",  name: "Meta Platforms", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+
+      // ETFs
+      { symbol: "SPY",      exchange: "NYSE",    name: "S&P 500 ETF", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "QQQ",      exchange: "NASDAQ",  name: "Nasdaq Tracker", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
     ];
 
     for (const inst of seededInstruments) {
       const existing = await db.select().from(instruments).where(eq(instruments.symbol, inst.symbol));
       if (existing.length === 0) {
         const [inserted] = await db.insert(instruments).values(inst as any).returning();
-        const base = inserted.symbol === "BTCUSDT" ? 60000 : 
-                   (inserted.symbol === "XAUUSD" ? 2600 : 
+        const base = (inserted.symbol as string).includes("BTC") ? 63000 : 
+                   ((inserted.symbol as string).includes("XAU") ? 2300 : 
                    (inserted.assetClass === "CRYPTO" ? 1000 : 150));
-        const price = base + Math.random() * base * 0.1;
+        const price = base + (Math.random() - 0.5) * base * 0.05;
         await db.insert(latestPrices).values({
           instrumentId: inserted.id,
           asOf: new Date(),
@@ -692,7 +720,7 @@ export class DatabaseStorage implements IStorage {
           changeAbs: "0.00",
           changePct: "0.00",
           sparkline: [String(price)],
-          isOpen: inserted.assetClass === "CRYPTO" // Institutional default for Crypto
+          isOpen: true
         } as any);
       }
     }
@@ -706,7 +734,8 @@ export class DatabaseStorage implements IStorage {
         email: "saran123@gmail.com",
         password: hashed,
         firstName: "saran",
-        autoTradeEnabled: true
+        autoTradeEnabled: true,
+        tradeMode: "DEMO"
       }).returning();
       
       await db.insert(portfolios).values({
