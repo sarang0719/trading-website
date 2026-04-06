@@ -1152,13 +1152,16 @@ export default function MarketDetail() {
             {priceData && (
               <div className={cn(
                 "hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[9px] font-black uppercase tracking-widest transition-all",
-                (priceData.isOpen || instrument.assetClass === "CRYPTO")
+                isGlobalMarketOpen(instrument.assetClass, instrument.symbol)
                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_8px_rgba(52,211,153,0.1)]" 
                   : "bg-rose-500/10 text-rose-400 border-rose-500/20"
               )}>
-                <span className={cn("h-1 w-1 rounded-full", (priceData.isOpen || instrument.assetClass === "CRYPTO") ? "bg-emerald-400 animate-pulse" : "bg-rose-400")} />
-                {(priceData.isOpen || instrument.assetClass === "CRYPTO") ? "LIVE" : "CLOSED"}
-                {(!priceData.isOpen && instrument.assetClass !== "CRYPTO") && (
+                <span className={cn(
+                  "h-1 w-1 rounded-full",
+                  isGlobalMarketOpen(instrument.assetClass, instrument.symbol) ? "bg-emerald-400 animate-pulse" : "bg-rose-400"
+                )} />
+                {isGlobalMarketOpen(instrument.assetClass, instrument.symbol) ? "LIVE" : "CLOSED"}
+                {(!isGlobalMarketOpen(instrument.assetClass, instrument.symbol) && instrument.assetClass !== "CRYPTO") && (
                   <span className="ml-1 opacity-60 lowercase font-medium">Re-opens Sun 22:00 UTC</span>
                 )}
               </div>

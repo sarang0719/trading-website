@@ -3,6 +3,7 @@ import { instruments, latestPrices, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import WebSocket from "ws";
 import { sendWinAlert } from "./sms";
+import { isGlobalMarketOpen } from "@shared/market-hours";
 
 const ALPHA_VANTAGE_API_KEY = "385249c9f711441797999463c29e0ead";
 
@@ -17,28 +18,6 @@ function generateRealisticSparkline(currentPrice: number, changeAbs: number, poi
   }
   sparkline[points - 1] = currentPrice.toString();
   return sparkline;
-}
-
-function isGlobalMarketOpen(assetClass: string): boolean {
-  const now = new Date();
-  const day = now.getUTCDay(); // 0 is Sunday, 6 is Saturday
-  const hour = now.getUTCHours();
-  
-  if (assetClass === "CRYPTO") return true;
-  
-  // Saturday is always closed
-  if (day === 6) return false;
-  // Sunday night opening: 22:00 UTC (6 PM EST)
-  if (day === 0) return hour >= 22;
-  
-  // Friday night close: 22:00 UTC
-  if (day === 5) return hour < 22;
-
-  // Specific Market Holidays 2026:
-  // Good Friday: April 3
-  if (now.getMonth() === 3 && now.getDate() === 3) return false;
-  
-  return true;
 }
 
 // --- Live Trading PnL Utilities ---
