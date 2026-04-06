@@ -262,7 +262,7 @@ export function startBackgroundTasks() {
           }
         }
 
-        const isOpen = isGlobalMarketOpen(instrument.assetClass);
+        const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
 
         if (priceData) {
           const currentPrice = parseFloat(priceData.price);
@@ -302,7 +302,7 @@ export function startBackgroundTasks() {
               const newChangeAbs = (parseFloat(currentRow.changeAbs as string) || 0) + precisionJitter;
               const newSparkline = await updateCachedSparkline(instrument, newPrice, newChangeAbs);
               
-              const isOpen = isGlobalMarketOpen(instrument.assetClass);
+              const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
               await db.update(latestPrices)
                 .set({
                   price: newPrice.toFixed(6),

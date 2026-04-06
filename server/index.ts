@@ -93,6 +93,24 @@ app.use((req, res, next) => {
          startBackgroundTasks();
          startAiBotEngine();
          log("Institutional background engines active.");
+
+         // PHASE 4: Immediate Institutional Market Sync
+         try {
+           const { isGlobalMarketOpen } = await import("../shared/market-hours");
+           const { instruments, latestPrices } = await import("../shared/schema");
+           const { eq } = await import("drizzle-orm");
+           const { db } = await import("./db");
+           const allInsts = await db.select().from(instruments);
+           for (const inst of allInsts) {
+             const isOpen = isGlobalMarketOpen(inst.assetClass, inst.symbol);
+             await db.update(latestPrices)
+               .set({ isOpen, asOf: new Date() })
+               .where(eq(latestPrices.instrumentId, inst.id));
+           }
+           log("Institutional market status synchronized.");
+         } catch (syncErr) {
+           console.error("[Sync Error]", syncErr);
+         }
        } catch (dbError) {
          console.error("[Background Init Error]", dbError);
        }

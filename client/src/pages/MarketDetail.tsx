@@ -36,6 +36,7 @@ import { useAiCredits } from "@/hooks/useAiCredits";
 import { AiPaymentModal } from "@/components/AiPaymentModal";
 import { useAuth } from "@/hooks/use-auth";
 import StrategyPanel from "@/components/StrategyPanel";
+import { isGlobalMarketOpen } from "@shared/market-hours";
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 
