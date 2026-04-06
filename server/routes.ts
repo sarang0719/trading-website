@@ -688,5 +688,39 @@ export async function registerRoutes(
   });
 
 
+  // ──────────────────────────────────────────────
+  // INSTITUTIONAL MARKET DATA PROXY (v66.0)
+  // ──────────────────────────────────────────────
+  app.get("/api/market-data/price/:symbol", async (req, res) => {
+    try {
+      let symbol = req.params.symbol;
+      // Institutional Symbol Mapping
+      if (symbol === "XAUUSD") symbol = "GC=F";
+      else if (symbol === "XAGUSD") symbol = "SI=F";
+      else if (symbol === "WTIUSD") symbol = "CL=F";
+      else if (symbol.length === 6 && !symbol.includes("USDT")) symbol = `${symbol}=X`;
+
+      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=1d`);
+      if (!response.ok) throw new Error("Yahoo Finance Fetch Failed");
+      
+      const data = await response.json() as any;
+      const result = data?.chart?.result?.[0];
+      if (result && result.meta?.regularMarketPrice) {
+        return res.json({
+          symbol: req.params.symbol,
+          price: result.meta.regularMarketPrice,
+          changeAbs: result.meta.regularMarketPrice - result.meta.previousClose,
+          changePct: ((result.meta.regularMarketPrice - result.meta.previousClose) / result.meta.previousClose) * 100,
+          asOf: new Date().toISOString(),
+          source: "Yahoo Finance Institutional"
+        });
+      }
+      res.status(404).json({ message: "Price data not available" });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+
   return httpServer;
 }

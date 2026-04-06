@@ -666,6 +666,8 @@ export default function MarketDetail() {
       setHoverPosition({ x: param.point.x, y: param.point.y });
     });
 
+    let targetPrice = displayPrice || 1500;
+    let lastWsTime = Date.now();
     const loadData = async () => {
       let baseData: any[] = [];
 
@@ -843,8 +845,8 @@ export default function MarketDetail() {
 
       // 7. Quotex-style High-Frequency Tick Engine
       let currentPrice = parseFloat((baseData[baseData.length - 1]?.close) || "0");
-      let targetPrice = currentPrice;
-      let lastWsTime = Date.now();
+      targetPrice = currentPrice;
+      lastWsTime = Date.now();
 
       // Calculate candle duration in seconds for new-candle detection
       let candleSecs = 60; // Default 1m
@@ -1006,14 +1008,33 @@ export default function MarketDetail() {
         } catch {}
       }
     };
-
     loadData();
+      
+    // I. Institutional Polling Fallback (v66.0)
+    // If WebSocket fails or is not supported, poll our reliable Yahoo Proxy every 15s
+    let poller: any;
+    if (isActive && instrument?.exchange !== "BINANCE") {
+      const fetchRealPrice = async () => {
+        if (!isActive) return;
+        try {
+          const res = await fetch(`/api/market-data/price/${instrument.symbol}`);
+          if (res.ok) {
+            const data = await res.json();
+            targetPrice = parseFloat(data.price);
+            lastWsTime = Date.now();
+          }
+        } catch {}
+      };
+      fetchRealPrice(); // Immediate initial pull
+      poller = setInterval(fetchRealPrice, 15000);
+    }
 
-    return () => {
-      isActive = false;
-      abortCtrl.abort();
-      ro.disconnect();
-      if (ws) {
+      return () => {
+        isActive = false;
+        abortCtrl.abort();
+        ro.disconnect();
+        if (poller) clearInterval(poller);
+        if (ws) {
         ws.onmessage = null;
         ws.onclose = null;
         ws.onopen = null;
