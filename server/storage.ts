@@ -663,7 +663,7 @@ export class DatabaseStorage implements IStorage {
   async seed(): Promise<void> {
     // Institutional Speed Guard: Skip seeding if already initialized to save RAM
     const [count] = await db.select({ count: sql<number>`count(*)::int` }).from(instruments);
-    if (count.count > 30) return;
+    if (count.count > 50) return;
 
     log("Seeding institutional market data [Comprehensive Mode]...");
 
@@ -676,6 +676,9 @@ export class DatabaseStorage implements IStorage {
       { symbol: "USDCHF",   exchange: "FOREX",   name: "US Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CHF", country: "CH", isActive: true, imageUrl: null },
       { symbol: "GBPJPY",   exchange: "FOREX",   name: "Pound vs Yen", assetClass: "FOREX" as any, currency: "JPY", country: "JP", isActive: true, imageUrl: null },
       { symbol: "USDCAD",   exchange: "FOREX",   name: "Dollar vs Canadian Dollar", assetClass: "FOREX" as any, currency: "CAD", country: "CA", isActive: true, imageUrl: null },
+      { symbol: "USDPKR",   exchange: "FOREX",   name: "US Dollar vs Pakistani Rupee", assetClass: "FOREX" as any, currency: "PKR", country: "PK", isActive: true, imageUrl: null },
+      { symbol: "USDINR",   exchange: "FOREX",   name: "US Dollar vs Indian Rupee", assetClass: "FOREX" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+      { symbol: "CADCHF",   exchange: "FOREX",   name: "Canadian Dollar vs Swiss Franc", assetClass: "FOREX" as any, currency: "CHF", country: "CH", isActive: true, imageUrl: null },
       
       // CRYPTO
       { symbol: "BTCUSDT",  exchange: "BINANCE", name: "Bitcoin",    assetClass: "CRYPTO" as any, currency: "USD", country: "GL", isActive: true, imageUrl: "https://assets.coincap.io/assets/icons/btc@2x.png" },
