@@ -721,6 +721,111 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/market-data/history/:symbol", async (req, res) => {
+    try {
+      let { symbol } = req.params;
+      const interval = (req.query.interval as string) || "1m";
+
+      let results: any[] = [];
+      let source = "";
+
+      const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
+      const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "b630be1ed9604a29a35ad8d11a8af18c";
+
+      // 1. Check if Crypto / Gold (use Binance)
+      const binanceSymbol = symbol === "XAUUSD" ? "PAXGUSDT" : symbol;
+      const isCrypto = symbol.endsWith("USDT") || symbol === "XAUUSD";
+
+      if (isCrypto) {
+         source = "Binance";
+         const binIntervalMap: any = {
+           "1m": "1m", "2m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+           "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
+         };
+         const bInt = binIntervalMap[interval] || "1m";
+         const bRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${bInt}&limit=500`);
+         if (bRes.ok) {
+           const data = await bRes.json();
+           if (Array.isArray(data)) {
+             results = data.map((d: any) => {
+                let open = parseFloat(d[1]), high = parseFloat(d[2]), low = parseFloat(d[3]), close = parseFloat(d[4]);
+                // Institutional Calibration for XAUUSD (PAXGUSDT Doubler Fix)
+                   // Live price handled directly
+                return {
+                  time: Math.floor(d[0] / 1000),
+                  open, high, low, close,
+                  volume: parseFloat(d[5]) || 0
+                };
+             });
+           }
+         }
+      }
+
+      // 2. Stocks (Alpha Vantage)
+      if (results.length === 0 && !isCrypto && !symbol.includes("USD") && !symbol.includes("EUR") && !symbol.includes("JPY")) {
+         source = "Alpha Vantage";
+         const avMap: any = { "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1H": "60min" };
+         let fn = interval.endsWith("m") || interval === "1H" ? "TIME_SERIES_INTRADAY" : "TIME_SERIES_DAILY";
+         let avIntParams = fn === "TIME_SERIES_INTRADAY" ? `&interval=${avMap[interval] || "60min"}` : "";
+         
+         const avRes = await fetch(`https://www.alphavantage.co/query?function=${fn}&symbol=${symbol}${avIntParams}&outputsize=compact&apikey=${ALPHA_VANTAGE_API_KEY}`);
+         if (avRes.ok) {
+           const data = await avRes.json();
+           const seriesKey = Object.keys(data).find(k => k.includes("Time Series"));
+           if (seriesKey) {
+             const series = data[seriesKey];
+             results = Object.keys(series).map(k => {
+               const item = series[k];
+               return {
+                 time: Math.floor(new Date(k).getTime() / 1000),
+                 open: parseFloat(item["1. open"]),
+                 high: parseFloat(item["2. high"]),
+                 low: parseFloat(item["3. low"]),
+                 close: parseFloat(item["4. close"]),
+                 volume: parseFloat(item["5. volume"]) || 0
+               };
+             }).sort((a,b) => a.time - b.time);
+           }
+         }
+      }
+
+      // 3. Forex / Others (TwelveData fallback)
+      if (results.length === 0) {
+         source = "TwelveData";
+         let tdSym = symbol;
+         if (symbol.length === 6 && symbol.endsWith("USD")) {
+            tdSym = `${symbol.substring(0,3)}/${symbol.substring(3,6)}`;
+         } else if (symbol.length === 6) {
+             tdSym = `${symbol.substring(0,3)}/${symbol.substring(3,6)}`; // Forex pairs
+         }
+
+         const tdMap: any = {
+           "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
+           "1H": "1h", "4H": "4h", "1D": "1day", "1W": "1week", "1M": "1month"
+         };
+         const tdInt = tdMap[interval] || "15min";
+         const tdRes = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tdInt}&outputsize=500&apikey=${TWELVEDATA_API_KEY}`);
+         if (tdRes.ok) {
+            const data = await tdRes.json();
+            if (data && data.values) {
+              results = data.values.map((v: any) => ({
+                time: Math.floor(new Date(v.datetime).getTime() / 1000),
+                open: parseFloat(v.open),
+                high: parseFloat(v.high),
+                low: parseFloat(v.low),
+                close: parseFloat(v.close),
+                volume: parseFloat(v.volume) || 0
+              })).sort((a: any, b: any) => a.time - b.time);
+            }
+         }
+      }
+
+      return res.json({ results, source });
+    } catch (err: any) {
+      return res.status(500).json({ message: err.message });
+    }
+  });
+
 
   return httpServer;
 }

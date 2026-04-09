@@ -1,7 +1,9 @@
 import admin from "firebase-admin";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 
-// v42.1 INSTITUTIONAL LAZY FIREBASE ADMIN
-// Optimized for Vercel Serverless to prevent initialization timeouts
+// v42.2 INSTITUTIONAL LAZY FIREBASE ADMIN
+// Optimized for Vercel & Institutional Reliability
 
 let initialized = false;
 
@@ -12,22 +14,50 @@ function ensureInitialized() {
     return admin;
   }
 
-  // Attempt to initialize with environment variables
   try {
      const projectId = process.env.VITE_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+     let serviceAccountData: any = null;
      
-     if (projectId && projectId !== "YOUR_PROJECT_ID") {
-        console.log(`[Firebase] Initializing Admin SDK for Project: ${projectId}`);
+     // Choice A: Official Environment Variable (Vercel/Render)
+     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+        try {
+           serviceAccountData = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        } catch (e) {
+           console.error("[Firebase] Error parsing FIREBASE_SERVICE_ACCOUNT env var. Ensure it is valid JSON.");
+        }
+     } 
+     
+     // Choice B: Institutional Private Key File (Local/Dedicated)
+     if (!serviceAccountData) {
+        const filePath = join(process.cwd(), "firebase-service-account.json");
+        if (existsSync(filePath)) {
+           try {
+              serviceAccountData = JSON.parse(readFileSync(filePath, "utf8"));
+           } catch (e) {
+              console.error("[Firebase] Error reading firebase-service-account.json. Ensure it is valid JSON.");
+           }
+        }
+     }
+     
+     if (serviceAccountData) {
+        console.log(`[Firebase] SUCCESS: Initializing with Service Account: ${serviceAccountData.project_id}`);
+        admin.initializeApp({
+           credential: admin.credential.cert(serviceAccountData),
+           projectId: serviceAccountData.project_id || projectId,
+        });
+        initialized = true;
+     } else if (projectId && projectId !== "YOUR_PROJECT_ID") {
+        console.warn("[Firebase] WARNING: No Service Account detected. Google token verification WILL fail on localhost.");
+        console.log(`[Firebase] Falling back to Project ID only: ${projectId}`);
         admin.initializeApp({
            projectId,
-           // credential: admin.credential.applicationDefault(),
         });
         initialized = true;
      } else {
-        console.warn("[Firebase] Skipping Admin SDK initialization (No Valid Project ID)");
+        console.error("[Firebase] CRITICAL ERROR: No Credentials found for Cloud Bridge.");
      }
   } catch (error) {
-     console.error("[Firebase] Admin SDK init error:", error);
+     console.error("[Firebase] Fatal Init Error:", error);
   }
   return admin;
 }

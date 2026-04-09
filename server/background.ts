@@ -5,7 +5,8 @@ import WebSocket from "ws";
 import { sendWinAlert } from "./sms";
 import { isGlobalMarketOpen } from "@shared/market-hours";
 
-const ALPHA_VANTAGE_API_KEY = "385249c9f711441797999463c29e0ead";
+const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
+const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "b630be1ed9604a29a35ad8d11a8af18c";
 
 function generateRealisticSparkline(currentPrice: number, changeAbs: number, points = 60): string[] {
   const startPrice = currentPrice - changeAbs;
@@ -43,7 +44,7 @@ function getFinalResult(trade: any, finalPrice: number) {
 }
 
 export function startBackgroundTasks() {
-  console.log("Starting API background tasks with Alpha Vantage key:", ALPHA_VANTAGE_API_KEY);
+  console.log("Starting API background tasks with Binance, AlphaVantage & TwelveData engines...");
 
   // One-time logo URL migration: replace cryptologos.cc with coincap.io
   const LOGO_MAP: Record<string, string> = {
@@ -206,7 +207,7 @@ export function startBackgroundTasks() {
     try {
       const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
       // Absorption Logic: If Binance WS is geoblocked, we absorb Crypto into the polling loop
-      const activeInstruments = allInstruments.filter(i => {
+      const activeInstruments = allInstruments.filter((i: any) => {
          if (i.assetClass === "CRYPTO") return isBinanceGeoBlocked;
          return true;
       });
@@ -216,49 +217,57 @@ export function startBackgroundTasks() {
         let priceData = null;
 
         if (instrument.symbol === "XAUUSD" || instrument.assetClass === "FOREX") {
-          // Priority 1: TwelveData for Institutional Gold/Forex
-          try {
-            const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
-            const res = await fetch(`https://api.twelvedata.com/price?symbol=${sym}&apikey=b630be1ed9604a29a35ad8d11a8af18c`);
-            const data = await res.json() as any;
-            if (data && data.price) {
-               priceData = { price: data.price, changeAbs: "0.01", changePct: "0.01" };
-            }
-          } catch {}
+          // Priority 0: Binance PAXGUSDT for XAUUSD (High-fidelity Gold spot proxy)
+          if (instrument.symbol === "XAUUSD") {
+            try {
+              const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT`);
+              const data = await res.json() as any;
+              if (data && data.price) {
+                let priceNum = parseFloat(data.price);
+                // Live Price fetch complete
+                priceData = { price: String(priceNum), changeAbs: "0.20", changePct: "0.01" };
+              }
+            } catch {}
+          }
 
-          // Priority 2: Yahoo Finance Fallback (Institutional Reliability)
+          // Priority 1: TwelveData fallback
           if (!priceData) {
             try {
-              const sym = instrument.symbol === "XAUUSD" ? "GC=F" : `${instrument.symbol}=X`;
-              const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1m&range=1d`);
+              const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
+              const res = await fetch(`https://api.twelvedata.com/price?symbol=${sym}&apikey=${TWELVEDATA_API_KEY}`);
               const data = await res.json() as any;
-              const result = data?.chart?.result?.[0];
-              if (result && result.meta?.regularMarketPrice) {
-                 priceData = {
-                    price: result.meta.regularMarketPrice.toString(),
-                    changeAbs: (result.meta.regularMarketPrice - result.meta.previousClose).toString(),
-                    changePct: (((result.meta.regularMarketPrice - result.meta.previousClose) / result.meta.previousClose) * 100).toString()
-                 };
+              if (data && data.price) {
+                 let val = parseFloat(data.price);
+                 // TwelveData fetch complete
+                 priceData = { price: String(val), changeAbs: "0.01", changePct: "0.01" };
               }
             } catch {}
           }
         }
 
-        if (!priceData && ["US_STOCK", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
-          callCount++;
-          const sym = instrument.assetClass === "INDIAN_STOCK" ? `${instrument.symbol}.BSE` : instrument.symbol;
+        if (!priceData && ["US_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
+          // Priority 0: Alpha Vantage (Primary Stock Feed)
           try {
-            const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${sym}&apikey=${ALPHA_VANTAGE_API_KEY}`);
+            const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${instrument.symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`);
             const data = await res.json() as any;
             if (data && data["Global Quote"] && data["Global Quote"]["05. price"]) {
               priceData = {
-                price: data["Global Quote"]["05. price"],
-                changeAbs: data["Global Quote"]["09. change"],
-                changePct: data["Global Quote"]["10. change percent"] ? data["Global Quote"]["10. change percent"].replace("%", "") : "0",
+                price: String(data["Global Quote"]["05. price"]),
+                changeAbs: String(data["Global Quote"]["09. change"]),
+                changePct: String(data["Global Quote"]["10. change percent"].replace("%", "")),
               };
             }
-          } catch (e) {
-            console.error(`Failed to fetch for ${sym}`, e);
+          } catch {}
+
+          // Priority 1: TwelveData Fallback
+          if (!priceData) {
+            try {
+              const res = await fetch(`https://api.twelvedata.com/price?symbol=${instrument.symbol}&apikey=${TWELVEDATA_API_KEY}`);
+              const data = await res.json() as any;
+              if (data && data.price) {
+                priceData = { price: data.price, changeAbs: "0.01", changePct: "0.01" };
+              }
+            } catch {}
           }
         }
 
@@ -281,39 +290,39 @@ export function startBackgroundTasks() {
             })
             .where(eq(latestPrices.instrumentId, instrument.id));
         } else {
-           // ── GUARANTEED PRECISION SIMULATION (CLOSED MARKETS) ───
-           const [currentRow] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, instrument.id));
-           if (currentRow) {
-              const currentPrice = parseFloat(currentRow.price as string);
-              const sparkline = (currentRow.sparkline as string[]) || [];
-              
-              // Analyze trend velocity for auto-guidance
-              const velocity = sparkline.length > 3 
-                 ? (Number(sparkline[sparkline.length - 1]) - Number(sparkline[0])) / Number(sparkline[0]) 
-                 : 0;
+            // ── GUARANTEED PRECISION SIMULATION (CLOSED MARKETS / GEO-BLOCKED) ───
+            const [currentRow] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, instrument.id));
+            if (currentRow) {
+               const currentPrice = parseFloat(currentRow.price as string);
+               const sparkline = (currentRow.sparkline as string[]) || [];
+               
+               // Analyze trend velocity for smoother momentum
+               const velocity = sparkline.length > 5 
+                  ? (Number(sparkline[sparkline.length - 1]) - Number(sparkline[0])) / Number(sparkline[0]) 
+                  : 0;
 
-              // Guided Drift: 0.05% - 0.15% favoring current momentum
-              let bias = velocity > 0 ? 0.0002 : velocity < 0 ? -0.0002 : (Math.random() * 0.0004 - 0.0002);
-              
-              // Extra "Institutional" kick to ensure signal accuracy
-              const precisionJitter = currentPrice * (bias + (Math.random() * 0.0001));
-              
-              const newPrice = currentPrice + precisionJitter;
-              const newChangeAbs = (parseFloat(currentRow.changeAbs as string) || 0) + precisionJitter;
-              const newSparkline = await updateCachedSparkline(instrument, newPrice, newChangeAbs);
-              
-              const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
-              await db.update(latestPrices)
-                .set({
-                  price: newPrice.toFixed(6),
-                  changeAbs: newChangeAbs.toFixed(6),
-                  sparkline: newSparkline,
-                  asOf: new Date(),
-                  isOpen
-                })
-                .where(eq(latestPrices.instrumentId, instrument.id));
-           }
-        }
+               // Guided Drift: 0.005% - 0.015% range per 5s cycle for professional-grade smoothness
+               let bias = velocity > 0 ? 0.00002 : velocity < 0 ? -0.00002 : (Math.random() * 0.00004 - 0.00002);
+               
+               // Micro-Jitter to simulate real-time liquidity
+               const precisionJitter = currentPrice * (bias + (Math.random() * 0.00003 - 0.000015));
+               
+               const newPrice = currentPrice + precisionJitter;
+               const newChangeAbs = (parseFloat(currentRow.changeAbs as string) || 0) + precisionJitter;
+               const newSparkline = await updateCachedSparkline(instrument, newPrice, newChangeAbs);
+               
+               const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
+               await db.update(latestPrices)
+                 .set({
+                   price: newPrice.toFixed(instrument.symbol.includes("USD") && instrument.symbol.length === 6 ? 5 : 2),
+                   changeAbs: newChangeAbs.toFixed(6),
+                   sparkline: newSparkline,
+                   asOf: new Date(),
+                   isOpen
+                 })
+                 .where(eq(latestPrices.instrumentId, instrument.id));
+            }
+         }
 
       }
     } catch (e) {
@@ -323,46 +332,33 @@ export function startBackgroundTasks() {
 
   setTimeout(() => {
     try {
-      console.log("Running initial background api fetch for stocks...");
+      console.log("Running initial institutional background api fetch for stocks...");
       (async () => {
         const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
         const stockInstruments = allInstruments.filter((i: any) => i.assetClass !== "CRYPTO");
-        let callCount = 0;
         for (const instrument of stockInstruments) {
           let priceData = null;
-          if (["US_STOCK", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
-            callCount++;
-            const sym = instrument.assetClass === "INDIAN_STOCK" ? `${instrument.symbol}.BSE` : instrument.symbol;
+          if (["US_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
             try {
-              const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${sym}&apikey=${ALPHA_VANTAGE_API_KEY}`);
+              const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${instrument.symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`);
               const data = await res.json() as any;
               if (data && data["Global Quote"] && data["Global Quote"]["05. price"]) {
                 priceData = {
-                  price: data["Global Quote"]["05. price"],
-                  changeAbs: data["Global Quote"]["09. change"],
-                  changePct: data["Global Quote"]["10. change percent"] ? data["Global Quote"]["10. change percent"].replace("%", "") : "0",
+                  price: String(data["Global Quote"]["05. price"]),
+                  changeAbs: String(data["Global Quote"]["09. change"]),
+                  changePct: String(data["Global Quote"]["10. change percent"].replace("%", "")),
                 };
               }
-            } catch (e) {
-              console.error(`Initial fetch failed for ${sym}`, e);
-            }
+            } catch {}
           } else if (instrument.assetClass === "FOREX") {
-            callCount++;
-            const fromC = instrument.symbol.substring(0, 3);
-            const toC = instrument.symbol.substring(3, 6);
+            const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
             try {
-              const res = await fetch(`https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=${fromC}&to_currency=${toC}&apikey=${ALPHA_VANTAGE_API_KEY}`);
+              const res = await fetch(`https://api.twelvedata.com/price?symbol=${sym}&apikey=${TWELVEDATA_API_KEY}`);
               const data = await res.json() as any;
-              if (data && data["Realtime Currency Exchange Rate"]) {
-                priceData = {
-                  price: data["Realtime Currency Exchange Rate"]["5. Exchange Rate"],
-                  changeAbs: "0",
-                  changePct: "0"
-                };
+              if (data && data.price) {
+                 priceData = { price: data.price, changeAbs: "0.01", changePct: "0.01" };
               }
-            } catch (e) {
-               console.error(`Initial fetch failed forex for ${fromC}-${toC}`, e);
-            }
+            } catch {}
           }
           if (priceData) {
             const currentPrice = parseFloat(priceData.price);
@@ -374,7 +370,7 @@ export function startBackgroundTasks() {
               .set({
                 price: String(priceData.price),
                 changeAbs: String(priceData.changeAbs),
-                changePct: String(priceData.changePct),
+                changePct: String(priceData.changePct) || "0",
                 sparkline: newSparkline,
                 asOf: new Date()
               })
@@ -405,22 +401,6 @@ export function startBackgroundTasks() {
 
           let currentPrice = parseFloat(priceRow.price as string);
           
-          if (trade.placedBy === "AI_BOT") {
-             // 97% Win Profit Engine for AI Bot — Maximum Accuracy Mode
-             const entryPrice = parseFloat(trade.strikePrice);
-             const forceWin = Math.random() < 0.97;
-             
-             if (forceWin) {
-                 // Dynamically scale the profit margin for realistic-looking results
-                 const profitMargin = entryPrice * (0.00005 + Math.random() * 0.0003);
-                 if (trade.side === "BUY" && currentPrice <= entryPrice) {
-                    currentPrice = entryPrice + profitMargin;
-                 } else if (trade.side === "SELL" && currentPrice >= entryPrice) {
-                    currentPrice = entryPrice - profitMargin;
-                 }
-             }
-          }
-
           const { result, returnAmount } = getFinalResult(trade, currentPrice);
 
           await storage.updateTimeBasedOrder(trade.id, {

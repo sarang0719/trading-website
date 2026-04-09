@@ -60,11 +60,32 @@ export default function AuthPage() {
         return;
       }
 
-      let idToken: string;
+      let idToken: string | null = null;
       if (isLogin) {
-        // Firebase Sign In
-        const result = await signInWithEmailAndPassword(auth, email, password);
-        idToken = await result.user.getIdToken();
+        // --- HYBRID LOGIN FLOW (v88.0) ---
+        try {
+          // Priority 1: Firebase Cloud Auth
+          const result = await signInWithEmailAndPassword(auth, email, password);
+          idToken = await result.user.getIdToken();
+        } catch (firebaseErr: any) {
+          console.warn("[Auth] Firebase Cloud Login failed, attempting Institutional Local Fallback...", firebaseErr.code);
+          
+          // Institutional Fallback: If cloud fails for any common reason (Invalid, Not Found, OR Network), try local.
+          const isFallbackError = ["auth/user-not-found", "auth/invalid-credential", "auth/invalid-email", "auth/network-request-failed"].includes(firebaseErr.code);
+          
+          if (isFallbackError) {
+             try {
+                await login({ email, password });
+                toast({ title: "Institutional Sync Active", description: "Logged in via High-Fidelity Local Engine." });
+                setLocation("/app");
+                return;
+             } catch (localErr: any) {
+                // If local also fails, then it's a real invalid credential
+                throw new Error("Invalid institutional credentials. Please verify your email and password.");
+             }
+          }
+          throw firebaseErr; // Re-throw if it's some other structural firebase error
+        }
       } else {
         // Firebase Sign Up
         const result = await createUserWithEmailAndPassword(auth, email, password);
@@ -72,17 +93,20 @@ export default function AuthPage() {
       }
 
       // Exchange Firebase token for local session
-      await loginWithFirebase(
-        isLogin 
-          ? { idToken } 
-          : { idToken, firstName, lastName }
-      );
+      if (idToken) {
+        await loginWithFirebase(
+          isLogin 
+            ? { idToken } 
+            : { idToken, firstName, lastName }
+        );
+      }
       
       if (!isLogin) {
         toast({ title: "Welcome!", description: "Cloud account created successfully." });
       }
       setLocation("/app");
     } catch (err: any) {
+      console.error("[Auth] Fatal Authentication Failure:", err);
       toast({
         variant: "destructive",
         title: "Authentication Error",

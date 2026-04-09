@@ -50,11 +50,21 @@ export default function AdminDashboard() {
   const [activeAdminTab, setActiveAdminTab] = useState<"users" | "withdrawals">("users");
   const [withdrawNotes, setWithdrawNotes] = useState("");
 
-  // Redirect non-admins
-  if (currentUser && currentUser.email !== "saran123@gmail.com") {
+  // Redirect non-admins (Institutional Gatekeeper)
+  const isMaster = currentUser?.email === "saran123@gmail.com";
+  const isOperator = currentUser?.email === "htctrade@gmail.com";
+
+  if (currentUser && !isMaster && !isOperator) {
      setLocation("/app");
      return null;
   }
+
+  // Force Admin 2 to withdrawals tab as they can't see users
+  useMemo(() => {
+    if (isOperator && activeAdminTab === "users") {
+      setActiveAdminTab("withdrawals");
+    }
+  }, [isOperator]);
 
   const { data: users, isLoading } = useQuery<any[]>({
     queryKey: ["/api/admin/users"],
@@ -67,11 +77,12 @@ export default function AdminDashboard() {
   });
 
   const controlMutation = useMutation({
-    mutationFn: async ({ userId, isBlocked, isAIBlocked }: any) => {
+    mutationFn: async (vars: any) => {
+      const { userId, ...payload } = vars;
       const res = await fetch(`/api/admin/users/${userId}/control`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isBlocked, isAIBlocked }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Failed to update user status");
       return res.json();
@@ -129,14 +140,16 @@ export default function AdminDashboard() {
           </div>
           
           <div className="flex bg-card/60 p-1 rounded-xl border border-border/40 gap-1 w-full md:w-fit self-end">
-             <Button 
-               variant={activeAdminTab === "users" ? "default" : "ghost"} 
-               size="sm" 
-               className="rounded-lg px-6"
-               onClick={() => setActiveAdminTab("users")}
-             >
-               <Users className="h-4 w-4 mr-2" /> Traders
-             </Button>
+             {isMaster && (
+               <Button 
+                 variant={activeAdminTab === "users" ? "default" : "ghost"} 
+                 size="sm" 
+                 className="rounded-lg px-6"
+                 onClick={() => setActiveAdminTab("users")}
+               >
+                 <Users className="h-4 w-4 mr-2" /> Traders
+               </Button>
+             )}
              <Button 
                variant={activeAdminTab === "withdrawals" ? "default" : "ghost"} 
                size="sm" 
@@ -258,7 +271,68 @@ export default function AdminDashboard() {
                          <div className="text-xs font-bold">{detail.loginHistory[0] ? format(new Date(detail.loginHistory[0].createdAt), "MMM d, HH:mm") : "Never"}</div>
                       </div>
                    </div>
-                </Card>
+
+                    {/* AI Governance Controls (v92.0) */}
+                    <div className="p-6 bg-accent/5 border-t border-border/20">
+                       <div className="flex items-center gap-2 mb-4">
+                          <Cpu className="h-4 w-4 text-primary" />
+                          <h3 className="text-xs uppercase font-black tracking-widest text-muted-foreground">AI Auto-Pilot Governance</h3>
+                       </div>
+                       
+                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          <div className="space-y-1.5">
+                             <label className="text-[10px] font-bold text-muted-foreground/80 uppercase">Bot Status</label>
+                             <div className="flex items-center gap-3 h-10 px-3 bg-background/50 border border-border/40 rounded-xl">
+                                <span className={`text-[10px] font-black uppercase ${detail.user.autoTradeEnabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                                   {detail.user.autoTradeEnabled ? 'Active' : 'Halted'}
+                                </span>
+                                <Button 
+                                   variant="ghost" 
+                                   size="sm" 
+                                   className={`h-6 px-2 rounded-lg text-[9px] font-black ${detail.user.autoTradeEnabled ? 'bg-rose-500/10 text-rose-500 hover:bg-rose-500/20' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+                                   onClick={() => controlMutation.mutate({ userId: detail.user.id, autoTradeEnabled: !detail.user.autoTradeEnabled })}
+                                >
+                                   {detail.user.autoTradeEnabled ? 'STOP' : 'START'}
+                                </Button>
+                             </div>
+                          </div>
+                          
+                          <div className="space-y-1.5">
+                             <label className="text-[10px] font-bold text-muted-foreground/80 uppercase">Trade Size (₹)</label>
+                             <input 
+                                type="text"
+                                className="w-full h-10 px-3 bg-background/50 border border-border/40 rounded-xl text-xs font-bold focus:border-primary outline-none transition-all"
+                                defaultValue={detail.user.autoTradeAmount || "5.00"}
+                                onBlur={(e) => controlMutation.mutate({ userId: detail.user.id, autoTradeAmount: e.target.value })}
+                             />
+                          </div>
+
+                          <div className="space-y-1.5">
+                             <label className="text-[10px] font-bold text-muted-foreground/80 uppercase text-emerald-500">Profit Target (₹)</label>
+                             <input 
+                                type="text"
+                                className="w-full h-10 px-3 bg-background/50 border border-emerald-500/20 rounded-xl text-xs font-bold text-emerald-400 focus:border-emerald-500 outline-none transition-all"
+                                defaultValue={detail.user.autoInvestProfitLimit || "100.00"}
+                                onBlur={(e) => controlMutation.mutate({ userId: detail.user.id, autoInvestProfitLimit: e.target.value })}
+                             />
+                          </div>
+
+                          <div className="space-y-1.5">
+                             <label className="text-[10px] font-bold text-muted-foreground/80 uppercase text-rose-500">Loss Limit (₹)</label>
+                             <input 
+                                type="text"
+                                className="w-full h-10 px-3 bg-background/50 border border-rose-500/20 rounded-xl text-xs font-bold text-rose-400 focus:border-rose-500 outline-none transition-all"
+                                defaultValue={detail.user.autoInvestLossLimit || "50.00"}
+                                onBlur={(e) => controlMutation.mutate({ userId: detail.user.id, autoInvestLossLimit: e.target.value })}
+                             />
+                          </div>
+                       </div>
+                       
+                       <p className="mt-4 text-[10px] text-muted-foreground italic font-medium">
+                          The QuantEdge engine will automatically halt the bot for this user once their net P&L reaches the target profit or breaches the loss limit.
+                       </p>
+                    </div>
+                 </Card>
 
                 {/* Tabs / Content */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

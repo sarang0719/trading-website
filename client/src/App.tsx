@@ -23,6 +23,7 @@ import NotFoundApp from "@/pages/NotFoundApp";
 import Strategy from "@/pages/Strategy";
 import Account from "@/pages/Account";
 import AdminDashboard from "@/pages/AdminDashboard";
+import ChartSandbox from "@/pages/ChartSandbox";
 
 function Router() {
   return (
@@ -47,6 +48,7 @@ function Router() {
       <Route path="/app/strategy" component={Strategy} />
       <Route path="/app/account" component={Account} />
       <Route path="/app/admin" component={AdminDashboard} />
+      <Route path="/app/sandbox" component={ChartSandbox} />
 
       {/* Nice 404 for app routes */}
       <Route path="/app/:rest*" component={NotFoundApp as any} />

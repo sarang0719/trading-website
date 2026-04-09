@@ -120,15 +120,18 @@ export default function Markets() {
                     const inst = binanceInsts.find((i: any) => i.symbol === t.s);
                     if (inst) {
                       updated = true;
-                      const currentPrice = parseFloat(t.c);
-                      const old = next[inst.id] || { price: currentPrice, changePct: 0, sparkline: Array(20).fill(currentPrice.toString()) };
-                      const newSpark = [...old.sparkline, currentPrice.toString()];
+                      let val = parseFloat(t.c);
+                      // Institutional Calibration v22.0: Binance Doubler Fix
+                      // Live price handled directly
+
+                      const old = next[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
+                      const newSpark = [...old.sparkline, val.toString()];
                       if (newSpark.length > 20) newSpark.shift();
                       
                       next[inst.id] = {
                         ...old,
-                        price: currentPrice,
-                        changePct: old.price ? ((currentPrice - old.price) / old.price) * 100 : 0,
+                        price: val,
+                        changePct: old.price ? ((val - old.price) / old.price) * 100 : 0,
                         sparkline: newSpark
                       };
                     }
@@ -166,17 +169,20 @@ export default function Markets() {
                    const inst = tdInsts.find((i: any) => i.symbol === normalizedSym || i.symbol === data.symbol);
                    if (inst) {
                        setLiveData(prev => {
-                          const currentPrice = parseFloat(data.price);
-                          const old = prev[inst.id] || { price: 1500, changePct: 0, sparkline: Array(20).fill(currentPrice.toString()) };
-                          const newSpark = [...old.sparkline, currentPrice.toString()];
+                          let val = parseFloat(data.price);
+                          // Institutional Calibration v22.0: TwelveData Doubler Fix
+                          // Live price handled directly
+
+                          const old = prev[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
+                          const newSpark = [...old.sparkline, val.toString()];
                           if (newSpark.length > 20) newSpark.shift();
                           
                           return {
                              ...prev,
                              [inst.id]: {
                                 ...old,
-                                price: currentPrice,
-                                changePct: old.price ? ((currentPrice - old.price) / old.price) * 100 : 0,
+                                price: val,
+                                changePct: old.price ? ((val - old.price) / old.price) * 100 : 0,
                                 sparkline: newSpark
                              }
                           };
@@ -193,16 +199,21 @@ export default function Markets() {
       isActive = false;
       if (wsBinance) {
         wsBinance.onmessage = null;
-        wsBinance.onclose = null;
         wsBinance.onerror = null;
-        try { wsBinance.close(); } catch {}
+        if (wsBinance.readyState === 0) {
+           wsBinance.onopen = () => { try { wsBinance.close(); } catch {} };
+        } else {
+           try { wsBinance.close(); } catch {}
+        }
       }
       if (wsTwelve) {
         wsTwelve.onmessage = null;
-        wsTwelve.onclose = null;
-        wsTwelve.onopen = null;
         wsTwelve.onerror = null;
-        try { wsTwelve.close(); } catch {}
+        if (wsTwelve.readyState === 0) {
+           wsTwelve.onopen = () => { try { wsTwelve.close(); } catch {} };
+        } else {
+           try { wsTwelve.close(); } catch {}
+        }
       }
     };
   }, [instruments.data]);

@@ -56,7 +56,7 @@ async function main() {
             }).returning();
 
             const inst = inserted[0];
-            const base = item.symbol.includes("BTC") ? 60000 : item.symbol.includes("ETH") ? 3000 : item.symbol.includes("XAU") ? 2300 : item.symbol.includes("TSLA") ? 200 : 1.1;
+            const base = item.symbol.includes("BTC") ? 60000 : item.symbol.includes("ETH") ? 3000 : item.symbol.includes("XAU") ? 4791 : item.symbol.includes("TSLA") ? 200 : 1.1;
             const price = base;
             const sparkline = Array.from({ length: 15 }, () => (price * (0.98 + Math.random() * 0.04)).toString());
 

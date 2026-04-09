@@ -172,6 +172,18 @@ export class DatabaseStorage implements IStorage {
       device: data.device,
       browser: data.browser,
     });
+    
+    // Institutional Cloud Mirror: Log to Firestore for high-fidelity persistence
+    try {
+      const { firestore } = await import("./firebase-admin");
+      await firestore.collection("logins").add({
+        userId,
+        ...data,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn("[Firestore Log] Skipping cloud login mirror:", e);
+    }
   }
 
   async logActivity(userId: string, action: string, details?: string): Promise<void> {
@@ -180,9 +192,29 @@ export class DatabaseStorage implements IStorage {
       action,
       details,
     });
+
+    // Institutional Cloud Mirror: Log to Firestore
+    try {
+      const { firestore } = await import("./firebase-admin");
+      await firestore.collection("activities").add({
+        userId,
+        action,
+        details,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn("[Firestore Log] Skipping cloud activity mirror:", e);
+    }
   }
 
-  async updateUserAdminFlags(userId: string, flags: { isBlocked?: boolean; isAIBlocked?: boolean }): Promise<User> {
+  async updateUserAdminFlags(userId: string, flags: { 
+    isBlocked?: boolean; 
+    isAIBlocked?: boolean;
+    autoTradeEnabled?: boolean;
+    autoTradeAmount?: string;
+    autoInvestProfitLimit?: string;
+    autoInvestLossLimit?: string;
+  }): Promise<User> {
     const [user] = await db.update(users).set(flags).where(eq(users.id, userId)).returning();
     if (!user) throw new Error("User not found");
     await syncUserToFirestore(user);
@@ -337,7 +369,7 @@ export class DatabaseStorage implements IStorage {
         userId: watchlists.userId,
         name: watchlists.name,
         createdAt: watchlists.createdAt,
-        itemCount: sql<number>`count(${watchlistItems.id})::int`.as("itemCount"),
+        itemCount: sql<number>`(SELECT count(*) FROM ${watchlistItems} WHERE ${watchlistItems.watchlistId} = ${watchlists.id})::int`.as("itemCount"),
       })
       .from(watchlists)
       .leftJoin(watchlistItems, eq(watchlistItems.watchlistId, watchlists.id))
@@ -661,11 +693,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seed(): Promise<void> {
-    // Institutional Speed Guard: Skip seeding if already initialized to save RAM
-    const [count] = await db.select({ count: sql<number>`count(*)::int` }).from(instruments);
-    if (count.count > 50) return;
-
-    log("Seeding institutional market data [Comprehensive Mode]...");
+    log("Synchronizing institutional market data and clearing errors...");
 
     const seededInstruments: Omit<Instrument, "id">[] = [
       // FOREX
@@ -712,10 +740,23 @@ export class DatabaseStorage implements IStorage {
       const existing = await db.select().from(instruments).where(eq(instruments.symbol, inst.symbol));
       if (existing.length === 0) {
         const [inserted] = await db.insert(instruments).values(inst as any).returning();
-        const base = (inserted.symbol as string).includes("BTC") ? 63000 : 
-                   ((inserted.symbol as string).includes("XAU") ? 2300 : 
-                   (inserted.assetClass === "CRYPTO" ? 1000 : 150));
-        const price = base + (Math.random() - 0.5) * base * 0.05;
+        
+        // Institutional Price Calibration v3.0
+        let base = 150;
+        const sym = (inserted.symbol as string);
+        // Institutional Base-price Mapping v4.0
+        if (sym === "BTCUSDT") base = 69717.92;
+        else if (sym === "ETHUSDT") base = 3755.20;
+        else if (sym === "XAUUSD") base = 2424.85;
+        else if (sym === "USDINR") base = 83.50;
+        else if (sym === "USDPKR") base = 278.40;
+        else if (sym === "USDJPY") base = 152.00;
+        else if (sym.includes("USD")) {
+          if (inserted.assetClass === "FOREX") base = 1.05; // EURUSD, GBPUSD approx
+          else base = 150;
+        }
+
+        const price = base + (Math.random() - 0.5) * base * 0.01;
         await db.insert(latestPrices).values({
           instrumentId: inserted.id,
           asOf: new Date(),
@@ -728,23 +769,33 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    // Auto-create permanent developer account
-    const existingUser = await db.select().from(users).where(eq(users.email, "saran123@gmail.com"));
-    if (existingUser.length === 0) {
-      const { hashPassword } = await import("./auth");
-      const hashed = await hashPassword("saran");
-      const [inserted] = await db.insert(users).values({
-        email: "saran123@gmail.com",
-        password: hashed,
-        firstName: "saran",
-        autoTradeEnabled: true,
-        tradeMode: "DEMO"
-      }).returning();
-      
-      await db.insert(portfolios).values({
-        userId: inserted.id,
-        name: "Main Portfolio",
-      } as any);
+    // Finalize: Auto-create institutional Admin Accounts v2.0
+    const admins = [
+      { email: "saran123@gmail.com", pass: "saran", firstName: "Admin-1", role: "ADMIN_1" },
+      { email: "htctrade@gmail.com", pass: "htc123", firstName: "Admin-2", role: "ADMIN_2" }
+    ];
+
+    for (const adminData of admins) {
+      const existingUser = await db.select().from(users).where(eq(users.email, adminData.email));
+      if (existingUser.length === 0) {
+        const { hashPassword } = await import("./auth");
+        const hashed = await hashPassword(adminData.pass);
+        const [inserted] = await db.insert(users).values({
+          email: adminData.email,
+          password: hashed,
+          firstName: adminData.firstName,
+          autoTradeEnabled: false,
+          tradeMode: "DEMO",
+          role: adminData.role,
+        } as any).returning();
+        
+        await db.insert(portfolios).values({
+          userId: inserted.id,
+          name: "Institutional Portfolio",
+        } as any);
+        
+        log(`Institutional Admin created: ${adminData.email} [Role: ${adminData.role}]`);
+      }
     }
   }
 }

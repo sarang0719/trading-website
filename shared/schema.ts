@@ -60,8 +60,11 @@ export const users = pgTable(
     // Admin Control Flags
     isBlocked: boolean("is_blocked").notNull().default(false),
     isAIBlocked: boolean("is_ai_blocked").notNull().default(false),
+    role: varchar("role", { length: 20 }).notNull().default("USER"), // USER, ADMIN_1, ADMIN_2
     autoInvestRound: integer("auto_invest_round").notNull().default(1),
     autoInvestRoundPnl: numeric("auto_invest_round_pnl", { precision: 18, scale: 2 }).notNull().default("0.00"),
+    autoInvestProfitLimit: numeric("auto_invest_profit_limit", { precision: 18, scale: 2 }).notNull().default("100.00"),
+    autoInvestLossLimit: numeric("auto_invest_loss_limit", { precision: 18, scale: 2 }).notNull().default("50.00"),
     commissionAgreed: boolean("commission_agreed").notNull().default(false),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),

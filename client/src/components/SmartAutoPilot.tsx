@@ -82,17 +82,24 @@ export default function SmartAutoPilot() {
 
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 relative z-10">
          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-lg font-bold flex items-center gap-2">
-                 <Bot className="w-5 h-5 text-primary" />
-                 Smart Auto-Pilot (QuantEdge v12.0)
-              </span>
-              <span className={`text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full ${isEnabled ? 'bg-primary/20 text-primary animate-pulse' : 'bg-muted text-muted-foreground'}`}>
-                 {isEnabled ? "System Active" : "Standby"}
-              </span>
+            <div className="flex items-center gap-3 mb-1">
+               <span className="text-lg font-black flex items-center gap-2 tracking-tighter">
+                  <Bot className="w-5 h-5 text-primary" />
+                  Smart Auto-Pilot (QuantEdge v12.0)
+               </span>
+               <div className="flex gap-2">
+                 <span className={`text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-full ${isEnabled ? 'bg-primary/20 text-primary animate-pulse border border-primary/20' : 'bg-muted text-muted-foreground'}`}>
+                    {isEnabled ? "System Active" : "Standby"}
+                 </span>
+                 {["saran123@gmail.com", "htctrade@gmail.com"].includes((user?.email || "").toLowerCase()) && (
+                   <span className="text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/20">
+                      Institutional Admin Mode
+                   </span>
+                 )}
+               </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Institutional AI evaluates active markets to place high-confidence short-term trades.
+            <p className="text-sm text-slate-400 font-medium">
+              Institutional AI evaluates active markets to place high-confidence short-term trades with unlimited capacity.
             </p>
          </div>
 

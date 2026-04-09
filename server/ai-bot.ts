@@ -86,64 +86,66 @@ export function startAiBotEngine() {
                   )
                );
             
-            if (userActiveTrades.length >= 3) continue; // Allow 3 concurrent AI trades
+            // --- UNLIMITED ADMIN BOT POWER (v91.0) ---
+            if (!isAdmin && userActiveTrades.length >= 5) continue; 
+            // Admins bypass the concurrent trade limit for maximum accumulation
 
             try {
-              const risk = await storage.checkRiskManagement(user.id);
+              const risk = !isAdmin ? await storage.checkRiskManagement(user.id) : { allowed: true };
               if (!risk.allowed) continue;
 
               // Shorter 30s trades for faster profit cycles
               const expiresAt = new Date(Date.now() + 30 * 1000);
 
-              let amountNum = parseFloat(user.autoTradeAmount || "5.00");
+              let amountNum = parseFloat(user.autoTradeAmount || "0.00");
+              if (amountNum < 1.0) continue; // Safety: skip if not configured
               
               // ── ROUND-BASED INVESTMENT LOGIC (NON-ADMINS) ──
               if (!isAdmin) {
                  const round = user.autoInvestRound || 1;
                  const pnl = parseFloat(user.autoInvestRoundPnl as string);
                  
-                 let roundProfitLimit = 50.00;
-                 let roundLossLimit = 20.00; // Mandatory loss limit
+                 // Use custom limits if set by Admin, otherwise fallback to defaults
+                 const profitLimit = parseFloat(user.autoInvestProfitLimit || "100.00");
+                 const lossLimit = parseFloat(user.autoInvestLossLimit || "50.00");
 
-                 if (round === 1) {
-                    amountNum = 50.00;
-                    roundProfitLimit = 50.00;
-                    roundLossLimit = 20.00;
-                 } else if (round === 2) {
-                    amountNum = 45.00;
-                    roundProfitLimit = 45.00;
-                    roundLossLimit = 20.00;
-                 } else if (round === 3) {
-                    amountNum = 35.00;
-                    roundProfitLimit = 35.00;
-                    roundLossLimit = 15.00;
-                 } else {
-                    // All rounds finished
+                 if (round === 1) { amountNum = 50.00; }
+                 else if (round === 2) { amountNum = 45.00; }
+                 else if (round === 3) { amountNum = 35.00; }
+                 else {
                     await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
                     continue;
                  }
 
-                 // Check Round Status (Profit Target or Loss Limit)
-                 if (pnl >= roundProfitLimit) continue; // Waiting for round incrementer in background.ts
-                 if (pnl <= -roundLossLimit) {
+                 // Check Admin-set Profit Target or Loss Limit
+                 if (pnl >= profitLimit) {
+                    // Reached target profit for this AI instance
+                    await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
+                    continue;
+                 }
+                 if (pnl <= -lossLimit) {
                     // STOP Auto-Invest on Loss Limit Breach
                     await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
                     continue;
                  }
+              } else {
+                 // Institutional Admin Mode: Scaled High-Value Investment
+                 amountNum = parseFloat(user.autoTradeAmount || "1000.00");
               }
 
-              // ── COMMISSION & BALANCE DEDUCTION ──
+              // ── UNLIMITED ADMIN BALANCE ──
               const commission = isAdmin ? 0 : (amountNum * 0.10);
               const totalDeduct = amountNum + commission;
 
-              // Check if user has enough Real Wallet Balance
-              if (parseFloat(user.walletBalance as string) < totalDeduct) {
-                 await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
-                 continue;
+              if (!isAdmin) {
+                 if (parseFloat(user.walletBalance as string) < totalDeduct) {
+                    await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
+                    continue;
+                 }
+                 // Deduct for non-admins
+                 await storage.updateWalletBalance(user.id, -totalDeduct);
               }
-
-              // Deduct Wallet Balance (Invest + Commission)
-              await storage.updateWalletBalance(user.id, -totalDeduct);
+              // Admins trade with unlimited capital — no deduction from real wallet balance.
 
               const order = await storage.createTimeBasedOrder(user.id, {
                 instrumentId: inst.id,

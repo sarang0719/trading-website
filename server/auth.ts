@@ -142,6 +142,11 @@ export async function setupAuth(app: Express) {
       walletBalance: u.walletBalance,
       demoBalance: u.demoBalance,
       tradeMode: u.tradeMode,
+      role: u.role,
+      autoTradeEnabled: u.autoTradeEnabled,
+      autoTradeAmount: u.autoTradeAmount,
+      autoInvestProfitLimit: u.autoInvestProfitLimit,
+      autoInvestLossLimit: u.autoInvestLossLimit
     });
   });
 
@@ -199,12 +204,12 @@ export async function setupAuth(app: Express) {
         // Log Activity
         const ua = req.headers["user-agent"];
         const browser = req.headers["sec-ch-ua"];
-        await storage.logLogin(user.id, {
+        await storage.logLogin(user!.id, {
           ip: req.ip,
           device: Array.isArray(ua) ? ua[0] : ua || "unknown",
           browser: Array.isArray(browser) ? browser[0] : browser || "standard browser"
         });
-        await storage.logActivity(user.id, "LOGIN", "Cloud authentication (Firebase)");
+        await storage.logActivity(user!.id, "LOGIN", "Cloud authentication (Firebase)");
 
         res.json({
           id: user!.id,
@@ -214,6 +219,11 @@ export async function setupAuth(app: Express) {
           walletBalance: user!.walletBalance,
           demoBalance: user!.demoBalance,
           tradeMode: user!.tradeMode,
+          role: user!.role,
+          autoTradeEnabled: user!.autoTradeEnabled,
+          autoTradeAmount: user!.autoTradeAmount,
+          autoInvestProfitLimit: user!.autoInvestProfitLimit,
+          autoInvestLossLimit: user!.autoInvestLossLimit
         });
       });
     } catch (error: any) {
