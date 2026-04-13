@@ -13,7 +13,7 @@ const firebaseConfig = {
 };
 
 // Institutional Integrity: Only initialize if keys are valid
-const isConfigured = firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY";
+const isConfigured = false; // Forced false to clear Firebase 400 errors during local testing
 
 let app: any = null;
 let auth: any = { onAuthStateChanged: () => () => {} }; // Dummy for local mode

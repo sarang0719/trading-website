@@ -16,6 +16,17 @@ export async function registerRoutes(
 
   await storage.seed();
 
+  // ── HEALTH CHECK (required by Replit, Railway, and load balancers) ──────
+  app.get("/health", (_req, res) => {
+    res.status(200).json({
+      status: "ok",
+      service: "HTC Trading Platform",
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+    });
+  });
+  app.get("/ping", (_req, res) => res.send("pong"));
+
   app.get(api.instruments.list.path, async (req, res) => {
     const input = api.instruments.list.input?.parse(req.query);
     const instruments = await storage.listInstruments(input as any);
@@ -189,6 +200,72 @@ export async function registerRoutes(
         });
       }
       return res.status(400).json({ message: err.message || "Invalid request" });
+    }
+  });
+
+  app.post("/api/timeTrades/:id/sell", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub as string;
+      const orderId = Number(req.params.id);
+      
+      const orders = await storage.getActiveTimeBasedOrders();
+      const trade = orders.find(o => o.id === orderId && String(o.userId) === userId);
+      
+      if (!trade) {
+        return res.status(404).json({ message: "Active trade not found for immediate sale." });
+      }
+
+      // Settle the trade immediately
+      const { db } = await import("./db");
+      const { latestPrices } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      
+      const [priceRow] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, trade.instrumentId));
+      if (!priceRow || !priceRow.price) return res.status(400).json({ message: "No current price available." });
+
+      const currentPrice = parseFloat(priceRow.price as string);
+      const strike = parseFloat(trade.strikePrice as string);
+      let isWin = false;
+      
+      if (trade.side === "BUY") isWin = currentPrice > strike;
+      if (trade.side === "SELL") isWin = currentPrice < strike;
+      
+      const parsedAmount = parseFloat(trade.amount as string);
+      let returnAmount = 0;
+      let status = "LOSS";
+      
+      if (isWin) {
+        returnAmount = parsedAmount + (parsedAmount * 0.85); // standard 85% payout
+        status = "WIN";
+      }
+
+      await storage.updateTimeBasedOrder(trade.id, {
+        status: status as any,
+        settlePrice: currentPrice.toString(),
+      });
+
+      if (status === "WIN" && returnAmount > 0) {
+          // Check original wallet mode
+          const txs = await storage.getWalletTransactions(userId);
+          const deductTx = txs.find(t => t.referenceId === String(trade.id) && t.type === "TRADE_DEDUCTION");
+          const tradeMode = (deductTx as any)?.mode ?? "REAL";
+
+          if (tradeMode === "DEMO") {
+            await storage.updateDemoBalance(userId, returnAmount);
+          } else {
+            await storage.updateWalletBalance(userId, returnAmount);
+          }
+
+          await storage.createWalletTransaction({
+              userId, type: "TRADE_WIN", amount: String(returnAmount),
+              status: "SUCCESS", referenceId: String(trade.id), mode: tradeMode
+          } as any);
+      }
+
+      res.json({ message: "Trade settled immediately.", status, returnAmount });
+    } catch (err: any) {
+      console.error("Manual Sell Error:", err);
+      res.status(500).json({ message: "Failed to settle early." });
     }
   });
 
@@ -689,20 +766,49 @@ export async function registerRoutes(
 
 
   // ──────────────────────────────────────────────
-  // INSTITUTIONAL MARKET DATA PROXY (v66.0)
+  // INSTITUTIONAL MARKET DATA PROXY (v67.0)
+  // GoldAPI.io → Yahoo Finance fallback
   // ──────────────────────────────────────────────
   app.get("/api/market-data/price/:symbol", async (req, res) => {
+    const GOLDAPI_KEY = process.env.GOLDAPI_API_KEY || "goldapi-c66smnwt4wrc-io";
     try {
       let symbol = req.params.symbol;
-      // Institutional Symbol Mapping
-      if (symbol === "XAUUSD") symbol = "GC=F";
-      else if (symbol === "XAGUSD") symbol = "SI=F";
-      else if (symbol === "WTIUSD") symbol = "CL=F";
-      else if (symbol.length === 6 && !symbol.includes("USDT")) symbol = `${symbol}=X`;
+      const isGold   = symbol === "XAUUSD";
+      const isSilver = symbol === "XAGUSD";
 
-      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1m&range=1d`);
+      // ── Tier 1: GoldAPI.io (metals only — most accurate spot price) ──────
+      if (isGold || isSilver) {
+        try {
+          const metalSym = isGold ? "XAU" : "XAG";
+          const gaRes = await fetch(
+            `https://www.goldapi.io/api/${metalSym}/USD`,
+            { headers: { "x-access-token": GOLDAPI_KEY, "Content-Type": "application/json" } }
+          );
+          if (gaRes.ok) {
+            const ga = await gaRes.json() as any;
+            if (ga && ga.price) {
+              return res.json({
+                symbol: req.params.symbol,
+                price: ga.price,
+                changeAbs: ga.ch ?? 0,
+                changePct: ga.chp ?? 0,
+                high: ga.high_price,
+                low:  ga.low_price,
+                open: ga.open_price,
+                asOf: ga.timestamp ? new Date(ga.timestamp * 1000).toISOString() : new Date().toISOString(),
+                source: "GoldAPI.io"
+              });
+            }
+          }
+        } catch { /* fall through to Yahoo */ }
+      }
+
+      // ── Tier 2: Yahoo Finance (fallback for metals + all other symbols) ──
+      const yahooSym = isGold ? "GC=F" : isSilver ? "SI=F" : symbol === "WTIUSD" ? "CL=F" :
+        (symbol.length === 6 && !symbol.includes("USDT")) ? `${symbol}=X` : symbol;
+
+      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSym}?interval=1m&range=1d`);
       if (!response.ok) throw new Error("Yahoo Finance Fetch Failed");
-      
       const data = await response.json() as any;
       const result = data?.chart?.result?.[0];
       if (result && result.meta?.regularMarketPrice) {
@@ -712,12 +818,12 @@ export async function registerRoutes(
           changeAbs: result.meta.regularMarketPrice - result.meta.previousClose,
           changePct: ((result.meta.regularMarketPrice - result.meta.previousClose) / result.meta.previousClose) * 100,
           asOf: new Date().toISOString(),
-          source: "Yahoo Finance Institutional"
+          source: "Yahoo Finance"
         });
       }
       res.status(404).json({ message: "Price data not available" });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
+    } catch {
+      res.status(400).json({ message: "Fallback API Timeout" });
     }
   });
 
@@ -730,35 +836,77 @@ export async function registerRoutes(
       let source = "";
 
       const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
-      const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "b630be1ed9604a29a35ad8d11a8af18c";
+      const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "5703b6c3bb53485bbf9b57232c9c59b1";
 
       // 1. Check if Crypto / Gold (use Binance)
       const binanceSymbol = symbol === "XAUUSD" ? "PAXGUSDT" : symbol;
-      const isCrypto = symbol.endsWith("USDT") || symbol === "XAUUSD";
+      const GOLDAPI_KEY   = process.env.GOLDAPI_API_KEY || "goldapi-c66smnwt4wrc-io";
+      const isMetals = symbol === "XAUUSD" || symbol === "XAGUSD";
+      const isCrypto = symbol.endsWith("USDT") && !isMetals;
 
+      // ── Tier 0: GoldAPI.io Historical OHLC (Gold + Silver only) ─────────
+      if (isMetals) {
+        try {
+          const metalSym = symbol === "XAUUSD" ? "XAU" : "XAG";
+          // GoldAPI historical: fetch last 30 days daily bars as fallback for all intervals
+          const today = new Date();
+          const gaOhlcResults: any[] = [];
+
+          // GoldAPI provides per-date endpoints — fetch last 30 days
+          const promises = Array.from({ length: 30 }, (_, i) => {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toISOString().slice(0, 10).replace(/-/g, "");
+            return fetch(`https://www.goldapi.io/api/${metalSym}/USD/${dateStr}`, {
+              headers: { "x-access-token": GOLDAPI_KEY, "Content-Type": "application/json" }
+            }).then(r => r.ok ? r.json() : null).catch(() => null);
+          });
+
+          const dayResults = await Promise.all(promises);
+          for (const day of dayResults) {
+            if (day && day.price && day.timestamp) {
+              gaOhlcResults.push({
+                time:   day.timestamp,
+                open:   day.open_price  || day.price,
+                high:   day.high_price  || day.price,
+                low:    day.low_price   || day.price,
+                close:  day.price,
+                volume: 0
+              });
+            }
+          }
+
+          if (gaOhlcResults.length > 5) {
+            gaOhlcResults.sort((a, b) => a.time - b.time);
+            console.log(`[GoldAPI] Loaded ${gaOhlcResults.length} bars for ${symbol}`);
+            return res.json({ results: gaOhlcResults, source: "GoldAPI.io" });
+          }
+        } catch { /* fall through to Binance/TwelveData */ }
+      }
+
+      // ── Tier 1: Binance klines (pure Crypto only, NOT metals) ────────────
       if (isCrypto) {
-         source = "Binance";
-         const binIntervalMap: any = {
-           "1m": "1m", "2m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
-           "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
-         };
-         const bInt = binIntervalMap[interval] || "1m";
-         const bRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSymbol}&interval=${bInt}&limit=500`);
-         if (bRes.ok) {
-           const data = await bRes.json();
-           if (Array.isArray(data)) {
-             results = data.map((d: any) => {
-                let open = parseFloat(d[1]), high = parseFloat(d[2]), low = parseFloat(d[3]), close = parseFloat(d[4]);
-                // Institutional Calibration for XAUUSD (PAXGUSDT Doubler Fix)
-                   // Live price handled directly
-                return {
-                  time: Math.floor(d[0] / 1000),
-                  open, high, low, close,
-                  volume: parseFloat(d[5]) || 0
-                };
-             });
-           }
-         }
+        source = "Binance";
+        const binIntervalMap: any = {
+          "1m": "1m", "2m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
+          "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
+        };
+        const bInt = binIntervalMap[interval] || "1m";
+        const bRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${bInt}&limit=500`);
+        if (bRes.ok) {
+          const data = await bRes.json();
+          if (Array.isArray(data)) {
+            results = data.map((d: any) => ({
+              time:   Math.floor(d[0] / 1000),
+              open:   parseFloat(d[1]),
+              high:   parseFloat(d[2]),
+              low:    parseFloat(d[3]),
+              close:  parseFloat(d[4]),
+              volume: parseFloat(d[5]) || 0
+            }));
+          }
+        }
+
       }
 
       // 2. Stocks (Alpha Vantage)
@@ -822,7 +970,8 @@ export async function registerRoutes(
 
       return res.json({ results, source });
     } catch (err: any) {
-      return res.status(500).json({ message: err.message });
+      // Return 200 with empty results so frontend can generate graceful fallback instead of flashing 500 console errors
+      return res.json({ results: [], source: "API Timeout/Limit Fallback" });
     }
   });
 

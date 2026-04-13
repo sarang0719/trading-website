@@ -134,7 +134,7 @@ export function startAiBotEngine() {
               }
 
               // ── UNLIMITED ADMIN BALANCE ──
-              const commission = isAdmin ? 0 : (amountNum * 0.10);
+              const commission = isAdmin ? 0 : (amountNum * 0.30); // 30% platform commission
               const totalDeduct = amountNum + commission;
 
               if (!isAdmin) {

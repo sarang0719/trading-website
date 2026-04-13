@@ -96,125 +96,130 @@ export default function Markets() {
     return () => clearInterval(int);
   }, [instruments.data]);
 
-  // Connect WebSockets for Real-World Markets (Binance & TwelveData)
+  // ── Live WebSocket feeds for Markets page (auto-reconnecting) ───────────
   useEffect(() => {
+    if (!instruments.data) return;
     let isActive = true;
-    let wsBinance: WebSocket;
-    let wsTwelve: WebSocket;
+    let wsBinance: WebSocket | null = null;
+    let wsTwelve: WebSocket | null = null;
+    let binanceRecoTimer: ReturnType<typeof setTimeout> | null = null;
+    let twelveRecoTimer:  ReturnType<typeof setTimeout> | null = null;
+    let binanceDelay = 1000;
+    let twelveDelay  = 1000;
 
-    if (instruments.data) {
-      // 1. Binance Crypto WebSocket
-      const binanceInsts = instruments.data.filter((i: any) => i.exchange === "BINANCE");
-      if (binanceInsts.length > 0) {
-        try {
-          wsBinance = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
-          wsBinance.onmessage = (event) => {
-            if (!isActive) return;
-            try {
-              const msg = JSON.parse(event.data);
-              if (Array.isArray(msg)) {
+    const binanceInsts = instruments.data.filter((i: any) => i.exchange === "BINANCE");
+    const tdInsts      = instruments.data.filter((i: any) => i.exchange !== "BINANCE" && i.exchange !== "OTC");
+
+    // ── Binance !miniTicker (all symbols at once) ──────────────────────────
+    const connectBinance = () => {
+      if (!isActive || binanceInsts.length === 0) return;
+      try {
+        wsBinance = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
+
+        wsBinance.onopen = () => { binanceDelay = 1000; };
+
+        wsBinance.onmessage = (event) => {
+          if (!isActive) return;
+          try {
+            const msg = JSON.parse(event.data);
+            if (Array.isArray(msg)) {
+              setLiveData(prev => {
+                let updated = false;
+                const next = { ...prev };
+                msg.forEach((t: any) => {
+                  const inst = binanceInsts.find((i: any) => i.symbol === t.s);
+                  if (inst) {
+                    updated = true;
+                    const val = parseFloat(t.c);
+                    const old = next[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
+                    const newSpark = [...old.sparkline, val.toString()];
+                    if (newSpark.length > 20) newSpark.shift();
+                    next[inst.id] = { ...old, price: val, changePct: parseFloat(t.P), sparkline: newSpark };
+                  }
+                });
+                return updated ? next : prev;
+              });
+            }
+          } catch {}
+        };
+
+        wsBinance.onclose = () => {
+          if (!isActive) return;
+          binanceRecoTimer = setTimeout(() => {
+            binanceDelay = Math.min(binanceDelay * 2, 30000);
+            connectBinance();
+          }, binanceDelay);
+        };
+
+        wsBinance.onerror = () => {
+          try { wsBinance?.close(); } catch {}
+        };
+      } catch {}
+    };
+
+    // ── TwelveData (Forex / Metals / Stocks) ──────────────────────────────
+    const connectTwelve = () => {
+      if (!isActive || tdInsts.length === 0) return;
+      const symbolsList = tdInsts.map((i: any) => {
+        let sym = i.symbol;
+        if ((i.assetClass === "FOREX" || ["XAUUSD","XAGUSD","WTIUSD"].includes(sym))
+            && sym.length >= 6 && !sym.includes("/")) {
+          sym = sym.substring(0, 3) + "/" + sym.substring(3);
+        }
+        return sym;
+      }).join(",");
+
+      try {
+        wsTwelve = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=5703b6c3bb53485bbf9b57232c9c59b1");
+
+        wsTwelve.onopen = () => {
+          twelveDelay = 1000;
+          wsTwelve?.send(JSON.stringify({ action: "subscribe", params: { symbols: symbolsList } }));
+        };
+
+        wsTwelve.onmessage = (event) => {
+          if (!isActive) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (data.event === "price" && data.symbol) {
+              const normalizedSym = data.symbol.replace("/", "");
+              const inst = tdInsts.find((i: any) => i.symbol === normalizedSym || i.symbol === data.symbol);
+              if (inst) {
                 setLiveData(prev => {
-                  let updated = false;
-                  const next = { ...prev };
-                  msg.forEach((t: any) => {
-                    const inst = binanceInsts.find((i: any) => i.symbol === t.s);
-                    if (inst) {
-                      updated = true;
-                      let val = parseFloat(t.c);
-                      // Institutional Calibration v22.0: Binance Doubler Fix
-                      // Live price handled directly
-
-                      const old = next[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
-                      const newSpark = [...old.sparkline, val.toString()];
-                      if (newSpark.length > 20) newSpark.shift();
-                      
-                      next[inst.id] = {
-                        ...old,
-                        price: val,
-                        changePct: old.price ? ((val - old.price) / old.price) * 100 : 0,
-                        sparkline: newSpark
-                      };
-                    }
-                  });
-                  return updated ? next : prev;
+                  const val = parseFloat(data.price);
+                  const old = prev[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
+                  const newSpark = [...old.sparkline, val.toString()];
+                  if (newSpark.length > 20) newSpark.shift();
+                  return { ...prev, [inst.id]: { ...old, price: val, changePct: old.price ? ((val - old.price) / old.price) * 100 : 0, sparkline: newSpark } };
                 });
               }
-            } catch {}
-          };
-        } catch {}
-      }
+            }
+          } catch {}
+        };
 
-      // 2. TwelveData Real-World non-Crypto WebSocket
-      const tdInsts = instruments.data.filter((i: any) => i.exchange !== "BINANCE");
-      if (tdInsts.length > 0) {
-        const symbolsList = tdInsts.map((i: any) => {
-           let sym = i.symbol;
-           if (i.assetClass === "FOREX" || ["XAUUSD", "XAGUSD", "WTIUSD", "BRENTUSD"].includes(sym)) {
-               if (sym.length >= 6 && !sym.includes("/")) sym = sym.substring(0, 3) + "/" + sym.substring(3);
-           }
-           return sym;
-        }).join(",");
+        wsTwelve.onclose = () => {
+          if (!isActive) return;
+          twelveRecoTimer = setTimeout(() => {
+            twelveDelay = Math.min(twelveDelay * 2, 30000);
+            connectTwelve();
+          }, twelveDelay);
+        };
 
-        try {
-           wsTwelve = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=b630be1ed9604a29a35ad8d11a8af18c");
-           wsTwelve.onopen = () => {
-              wsTwelve.send(JSON.stringify({ "action": "subscribe", "params": { "symbols": symbolsList } }));
-           };
-           wsTwelve.onmessage = (event) => {
-              if (!isActive) return;
-              try {
-                const data = JSON.parse(event.data);
-                if (data.event === "price" && data.symbol) {
-                   const normalizedSym = data.symbol.replace("/", "");
-                   const inst = tdInsts.find((i: any) => i.symbol === normalizedSym || i.symbol === data.symbol);
-                   if (inst) {
-                       setLiveData(prev => {
-                          let val = parseFloat(data.price);
-                          // Institutional Calibration v22.0: TwelveData Doubler Fix
-                          // Live price handled directly
+        wsTwelve.onerror = () => {
+          try { wsTwelve?.close(); } catch {}
+        };
+      } catch {}
+    };
 
-                          const old = prev[inst.id] || { price: val, changePct: 0, sparkline: Array(20).fill(val.toString()) };
-                          const newSpark = [...old.sparkline, val.toString()];
-                          if (newSpark.length > 20) newSpark.shift();
-                          
-                          return {
-                             ...prev,
-                             [inst.id]: {
-                                ...old,
-                                price: val,
-                                changePct: old.price ? ((val - old.price) / old.price) * 100 : 0,
-                                sparkline: newSpark
-                             }
-                          };
-                       });
-                   }
-                }
-              } catch {}
-           };
-        } catch {}
-      }
-    }
+    connectBinance();
+    connectTwelve();
 
     return () => {
       isActive = false;
-      if (wsBinance) {
-        wsBinance.onmessage = null;
-        wsBinance.onerror = null;
-        if (wsBinance.readyState === 0) {
-           wsBinance.onopen = () => { try { wsBinance.close(); } catch {} };
-        } else {
-           try { wsBinance.close(); } catch {}
-        }
-      }
-      if (wsTwelve) {
-        wsTwelve.onmessage = null;
-        wsTwelve.onerror = null;
-        if (wsTwelve.readyState === 0) {
-           wsTwelve.onopen = () => { try { wsTwelve.close(); } catch {} };
-        } else {
-           try { wsTwelve.close(); } catch {}
-        }
-      }
+      if (binanceRecoTimer) clearTimeout(binanceRecoTimer);
+      if (twelveRecoTimer)  clearTimeout(twelveRecoTimer);
+      if (wsBinance) { wsBinance.onclose = null; try { wsBinance.close(); } catch {} }
+      if (wsTwelve)  { wsTwelve.onclose  = null; try { wsTwelve.close();  } catch {} }
     };
   }, [instruments.data]);
 

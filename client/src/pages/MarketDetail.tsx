@@ -20,7 +20,7 @@ import {
   MousePointer2, Crosshair, Minus, Pencil, Type, Square,
   Bell, Clock, PlusCircle, MinusCircle, CheckCircle,
   XCircle, BrainCircuit, Zap, TrendingDown, ChevronRight,
-  Lock, RefreshCw
+  Lock, RefreshCw, Maximize
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent,
@@ -39,6 +39,7 @@ import { AiPaymentModal } from "@/components/AiPaymentModal";
 import { useAuth } from "@/hooks/use-auth";
 import StrategyPanel from "@/components/StrategyPanel";
 import { isGlobalMarketOpen } from "@shared/market-hours";
+import TradingViewChart from "@/components/TradingViewChart";
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 
@@ -199,7 +200,65 @@ export default function MarketDetail() {
   // tradeDuration is always aligned with the chart timeframe (candle period)
   const [tradeDuration, setTradeDuration] = useState(60); // default: 1m candle
   const [livePrice, setLivePrice] = useState<number | null>(null);
-  
+
+  // ── Standalone Live Price Engine (keeps header price live, TradingView handles chart) ──
+  useEffect(() => {
+    if (!instrument) return;
+    let isActive = true;
+    let ws: WebSocket | null = null;
+    let poller: ReturnType<typeof setInterval> | null = null;
+    let wsRecoTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsDelay = 1000;
+
+    const fetchPrice = async () => {
+      if (!isActive) return;
+      try {
+        const res = await fetch(`/api/market-data/price/${instrument.symbol}`);
+        if (res.ok) {
+          const d = await res.json();
+          if (d.price && isActive) setLivePrice(parseFloat(d.price));
+        }
+      } catch {}
+    };
+
+    if (instrument.exchange === "BINANCE" && instrument.symbol !== "XAUUSD") {
+      // ── Binance WebSocket for crypto (instant tick) ──────────────────────
+      const connectWS = () => {
+        if (!isActive) return;
+        const sym = instrument.symbol.toLowerCase();
+        ws = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@miniTicker`);
+        ws.onopen  = () => { wsDelay = 1000; };
+        ws.onmessage = (e) => {
+          if (!isActive) return;
+          try {
+            const m = JSON.parse(e.data);
+            if (m.c) setLivePrice(parseFloat(m.c));
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (!isActive) return;
+          wsRecoTimer = setTimeout(() => {
+            wsDelay = Math.min(wsDelay * 2, 30000);
+            connectWS();
+          }, wsDelay);
+        };
+        ws.onerror = () => { try { ws?.close(); } catch {} };
+      };
+      connectWS();
+    } else {
+      // ── REST polling for Gold, Silver, Forex (every 2s) ──────────────────
+      fetchPrice(); // immediate first fetch
+      poller = setInterval(fetchPrice, 2000);
+    }
+
+    return () => {
+      isActive = false;
+      if (wsRecoTimer) clearTimeout(wsRecoTimer);
+      if (poller)      clearInterval(poller);
+      if (ws) { ws.onclose = null; try { ws.close(); } catch {} }
+    };
+  }, [instrument?.symbol, instrument?.exchange]);
+
   // Custom Candle Detail Hover states
   const [hoverTimeStr, setHoverTimeStr] = useState<string | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number, y: number } | null>(null);
@@ -243,6 +302,30 @@ export default function MarketDetail() {
   const candlesRef = useRef<any[]>([]);
   const smaSeriesRef = useRef<any>(null);
   const emaSeriesRef = useRef<any>(null);
+
+  const handleZoomIn = useCallback(() => {
+    if (!chartRef.current) return;
+    const ts = chartRef.current.timeScale();
+    ts.applyOptions({ barSpacing: Math.min(ts.options().barSpacing * 1.3, 50) });
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    if (!chartRef.current) return;
+    const ts = chartRef.current.timeScale();
+    ts.applyOptions({ barSpacing: Math.max(ts.options().barSpacing / 1.3, 0.5) });
+  }, []);
+
+  const handleResetFit = useCallback(() => {
+    if (!chartRef.current) return;
+    chartRef.current.timeScale().fitContent();
+    chartRef.current.priceScale("right").applyOptions({ autoScale: true });
+  }, []);
+
+  const handleToggleAutoScale = useCallback(() => {
+    if (!chartRef.current) return;
+    const currentScale = chartRef.current.priceScale("right").options().autoScale;
+    chartRef.current.priceScale("right").applyOptions({ autoScale: !currentScale });
+  }, []);
 
   // --- Auto-Invest / AI State ---
   const [aiSignal, setAiSignal] = useState<"BUY" | "SELL">("BUY");
@@ -581,17 +664,25 @@ export default function MarketDetail() {
         horzLines: { color: "rgba(255,255,255,0.04)" },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.08)" },
+      rightPriceScale: { 
+        borderColor: "rgba(255,255,255,0.08)",
+        autoScale: true,
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.2, // increased bottom margin slightly
+        },
+      },
       timeScale: { 
         borderColor: "rgba(255,255,255,0.08)", 
         timeVisible: true, 
         secondsVisible: false,
-        rightOffset: 5,
+        rightOffset: 12, // match TradingView standard right offset
+        barSpacing: 8,   // slightly wider candles by default like TradingView
+        minBarSpacing: 1.5, // prevent "unsized/dot" candles when zoomed all the way out
         fixLeftEdge: false,
         fixRightEdge: false,
       },
-      width:  chartContainerRef.current.clientWidth || 300,
-      height: chartContainerRef.current.clientHeight || 400,
+      autoSize: true, // Native responsive sizing, replaces clientWidth/clientHeight logic
     });
 
     // 2. Add main series based on chart type
@@ -599,16 +690,16 @@ export default function MarketDetail() {
     if (chartType === "candle" || chartType === "hollow" || chartType === "heikin") {
       const hollow = chartType === "hollow";
       mainSeries = chart.addSeries(CandlestickSeries, {
-        upColor:        hollow ? "transparent" : "#22c55e",
-        downColor:      "#ef4444",
+        upColor:        hollow ? "transparent" : "#0ecb81",
+        downColor:      "#f6465d",
         borderVisible:  hollow,
-        borderUpColor:  "#22c55e",
-        borderDownColor:"#ef4444",
-        wickUpColor:    "#22c55e",
-        wickDownColor:  "#ef4444",
+        borderUpColor:  "#0ecb81",
+        borderDownColor:"#f6465d",
+        wickUpColor:    "#0ecb81",
+        wickDownColor:  "#f6465d",
       });
     } else if (chartType === "bar") {
-      mainSeries = chart.addSeries(BarSeries, { upColor: "#22c55e", downColor: "#ef4444" });
+      mainSeries = chart.addSeries(BarSeries, { upColor: "#0ecb81", downColor: "#f6465d" });
     } else if (chartType === "area") {
       mainSeries = chart.addSeries(AreaSeries, {
         lineColor: "#2962FF", topColor: "rgba(41,98,255,0.4)",
@@ -617,10 +708,10 @@ export default function MarketDetail() {
     } else if (chartType === "baseline") {
       mainSeries = chart.addSeries(BaselineSeries, {
         baseValue: { type: "price", price: 0 },
-        topLineColor: "#22c55e", topFillColor1: "rgba(34,197,94,0.28)",
-        topFillColor2: "rgba(34,197,94,0.05)",
-        bottomLineColor: "#ef4444", bottomFillColor1: "rgba(239,68,68,0.05)",
-        bottomFillColor2: "rgba(239,68,68,0.28)",
+        topLineColor: "#0ecb81", topFillColor1: "rgba(14,203,129,0.28)",
+        topFillColor2: "rgba(14,203,129,0.05)",
+        bottomLineColor: "#f6465d", bottomFillColor1: "rgba(246,70,93,0.05)",
+        bottomFillColor2: "rgba(246,70,93,0.28)",
       });
     } else if (chartType === "line" || chartType === "stepline") {
       mainSeries = chart.addSeries(LineSeries, {
@@ -644,27 +735,17 @@ export default function MarketDetail() {
     mainSeriesRef.current = mainSeries;
     volumeSeriesRef.current = volumeSeries;
     
-    // Add hidden indicator series initially
+    // Array of indicator refs for toggling visibility
     smaSeriesRef.current = chart.addSeries(LineSeries, { color: "rgba(255, 193, 7, 0.8)", lineWidth: 2, title: "SMA(20)" });
     emaSeriesRef.current = chart.addSeries(LineSeries, { color: "rgba(103, 58, 183, 0.8)", lineWidth: 2, title: "EMA(55)" });
     smaSeriesRef.current.applyOptions({ visible: showIndicators });
     emaSeriesRef.current.applyOptions({ visible: showIndicators });
 
-    // 5. Auto-resize observer
-    const ro = new ResizeObserver(() => {
-      if (chartContainerRef.current && chart) {
-        chart.applyOptions({
-          width:  chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        });
-      }
-    });
-    ro.observe(chartContainerRef.current);
-
     // 6. Load data from APIs
     const interval = TF_MAP[timeframe] || "1d";
 
     chart.subscribeCrosshairMove((param) => {
+      if (!isActive) return;
       if (!param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
           setHoverTimeStr(null);
           setHoverPosition(null);
@@ -692,9 +773,89 @@ export default function MarketDetail() {
       setHoverPosition({ x: param.point.x, y: param.point.y });
     });
 
-    let targetPrice = displayPrice || 0;
-    let lastWsTime = Date.now();
+    // ═══════════════════════════════════════════════════════════════════════
+    // PROFESSIONAL REAL-TIME CANDLE ENGINE v2.0
+    // Architecture: Load history → define updateLiveCandle → start smooth
+    // interpolation loop → connect WebSocket → poller for non-WS markets
+    // ═══════════════════════════════════════════════════════════════════════
 
+    // Shared mutable state (closure-based, never stale)
+    let targetPrice  = displayPrice || 0;
+    let currentPrice = displayPrice || 0;
+    let liveOpen     = displayPrice || 0;
+    let liveHigh     = displayPrice || 0;
+    let liveLow      = displayPrice || 0;
+    let candleSecs   = 60;
+    let lastWsTime   = Date.now();
+
+    // ── Step 1: Calculate candle duration from timeframe ─────────────────
+    const calcCandleSecs = (iv: string) => {
+      const m = iv.match(/^(\d+)([a-zA-Z]+)$/);
+      if (!m) return 60;
+      const v = parseInt(m[1]), u = m[2];
+      if (u === "m")           return v * 60;
+      if (u === "h" || u === "H") return v * 3600;
+      if (u === "d" || u === "D") return v * 86400;
+      if (u === "w" || u === "W") return v * 604800;
+      if (u === "M")           return v * 2592000;
+      return 60;
+    };
+
+    // ── Step 2: Define updateLiveCandle FIRST so interval can safely call it ──
+    const updateLiveCandle = (val: number, forceTime?: number, msgO?: number, msgH?: number, msgL?: number) => {
+      if (!isActive || !mainSeriesRef.current || !chartRef.current) return;
+
+      currentPrice = val;
+      setLivePrice(val);
+
+      try {
+        const series = mainSeriesRef.current;
+        const dataArr = series.data();
+        if (!dataArr || dataArr.length === 0) return;
+        const last = dataArr[dataArr.length - 1] as any;
+
+        // Determine which candle timestamp this tick belongs to
+        const nowSec    = Math.floor(Date.now() / 1000);
+        const bucketNow = Math.floor(nowSec / candleSecs) * candleSecs;
+
+        let activeTime: number;
+        if (forceTime) {
+          activeTime = Math.floor(forceTime / candleSecs) * candleSecs;
+        } else {
+          activeTime = bucketNow >= last.time + candleSecs ? bucketNow : last.time;
+        }
+
+        if (activeTime < last.time) return; // ignore stale ticks
+
+        if (activeTime > last.time) {
+          // ── New candle starts ──
+          liveOpen  = msgO ?? val;
+          liveHigh  = msgH ?? val;
+          liveLow   = msgL ?? val;
+          series.update({
+            time: activeTime as UTCTimestamp,
+            open: liveOpen, high: liveHigh, low: liveLow, close: val, value: val,
+          });
+        } else {
+          // ── Update active candle ──
+          if (msgO !== undefined) liveOpen = msgO;
+          if (msgH !== undefined) liveHigh = msgH;
+          if (msgL !== undefined) liveLow  = msgL;
+          liveHigh = Math.max(liveHigh, val);
+          liveLow  = Math.min(liveLow,  val);
+          series.update({
+            time:  last.time,
+            open:  liveOpen,
+            high:  liveHigh,
+            low:   liveLow,
+            close: val,
+            value: val,
+          });
+        }
+      } catch { /* ignore */ }
+    };
+
+    // ── Step 3: Load historical candles ──────────────────────────────────
     const loadData = async () => {
       let baseData: any[] = [];
 
@@ -727,27 +888,7 @@ export default function MarketDetail() {
         }
       }
 
-      // Tier 2: Direct Binance Fallback (For Crypto & Gold)
-      if (baseData.length === 0 && (instrument?.assetClass === "CRYPTO" || instrument?.symbol === "XAUUSD" || instrument?.symbol === "BTCUSDT")) {
-        try {
-          const binSymbol = instrument.symbol === "XAUUSD" ? "PAXGUSDT" : instrument.symbol;
-          const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binSymbol}&interval=${timeframe}&limit=500`);
-          if (res.ok) {
-            const raw = await res.json();
-            if (isActive && Array.isArray(raw)) {
-               baseData = raw.map((d: any) => {
-                  let open = parseFloat(d[1]), high = parseFloat(d[2]), low = parseFloat(d[3]), close = parseFloat(d[4]);
-                  // Reverted Live Candle Patch: rely on actual high/low/close without artificial division
-
-                  return {
-                     time: (d[0] / 1000) as UTCTimestamp,
-                     open, high, low, close, value: close
-                  };
-               });
-            }
-          }
-        } catch {}
-      }
+      // Tier 2 removed to prevent browser CORS error spam; Backend reliably proxies or falls back.
 
       // Tier 3: Mock Generation (Anchor to current price - Absolute Last Resort)
       if (baseData.length === 0) {
@@ -781,191 +922,228 @@ export default function MarketDetail() {
 
       if (!isActive || !mainSeries || baseData.length === 0) return;
 
-      // ---- SPIKE / ERROR FIX: Remove anomalous high/low spikes only (prevent removing valid trends) ----
-      baseData = baseData.filter((candle: any) => {
-          if (instrument?.symbol === "XAUUSD") {
-              // PAXGUSDT proxy has flash-crashes and spikes. Remove massive anomalous wicks only.
-              const upperWick = candle.high - Math.max(candle.open, candle.close);
-              const lowerWick = Math.min(candle.open, candle.close) - candle.low;
-              // Expand the wick filter for 4000+ prices as $20 is too small
-              if (upperWick > 150 || lowerWick > 150) return false;
-          }
-          // Standard filter for valid data: ensures we don't accidentally remove normal trending candles
-          return candle.high >= candle.low && candle.open > 0;
-      });
+        // ─── Universal Spike Filter: removes glitched candles for ALL symbols ───
+        if (baseData.length > 2) {
+          const avgClose = baseData.slice(-50).reduce((s: number, c: any) => s + c.close, 0) / Math.min(baseData.length, 50);
+          // XAUUSD uses tighter 2% threshold (PAXGUSDT proxy has more glitches)
+          const spikePercent = (instrument?.symbol === "XAUUSD") ? 0.02 : 0.05;
+          const spikeThreshold = avgClose * spikePercent;
+          baseData = baseData.filter((candle: any) => {
+            if (!candle.open || !candle.close || !candle.high || !candle.low) return false;
+            if (candle.high <= 0 || candle.low <= 0) return false;
+            const upperWick = candle.high - Math.max(candle.open, candle.close);
+            const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+            if (upperWick > spikeThreshold) return false;
+            if (lowerWick > spikeThreshold) return false;
+            return candle.high >= candle.low;
+          });
+        }
 
+      // ─── Render historical candles and volume ────────────────────────────
       try {
         mainSeries.setData(baseData);
         volumeSeries.setData(baseData.map((d: any) => ({
-          time:  d.time, value: d.volume,
-          color: d.close >= d.open ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)",
+          time: d.time, value: d.volume || 0,
+          color: d.close >= d.open ? "rgba(14,203,129,0.5)" : "rgba(246,70,93,0.5)",
         })));
-        
-        const last = baseData[baseData.length - 1].time as number;
-        let from = baseData[0].time as number;
-        if (activeRange === "1D") from = last - 86400;
-        else if (activeRange === "5D") from = last - 432000;
-        else if (activeRange === "1M") from = last - 2592000;
-        
-        chart.timeScale().setVisibleRange({ from: Math.max(from, baseData[0].time) as UTCTimestamp, to: (last + 60) as UTCTimestamp });
+
+        // Scroll to show latest candles
+        const lastTime = baseData[baseData.length - 1].time as number;
+        const firstTime = baseData[0].time as number;
+        let fromTime = firstTime;
+        if (activeRange === "1D") fromTime = lastTime - 86400;
+        else if (activeRange === "5D") fromTime = lastTime - 432000;
+        else if (activeRange === "1M") fromTime = lastTime - 2592000;
+        chart.timeScale().setVisibleRange({
+          from: Math.max(fromTime, firstTime) as UTCTimestamp,
+          to: (lastTime + candleSecs * 5) as UTCTimestamp,
+        });
         candlesRef.current = baseData;
 
-        // Indicators
-        const smaData = [], emaData = [], closes = baseData.map(d => d.close);
-        let currEma = closes[0];
+        // SMA(20) + EMA(55) indicators
+        const closes = baseData.map((d: any) => d.close);
+        const smaData: any[] = [], emaData: any[] = [];
+        let ema = closes[0];
         for (let i = 0; i < baseData.length; i++) {
-          if (i >= 19) smaData.push({ time: baseData[i].time, value: closes.slice(i-19, i+1).reduce((a,b)=>a+b)/20 });
-          const k = 2/(55+1); currEma = closes[i]*k + currEma*(1-k);
-          if (i >= 54) emaData.push({ time: baseData[i].time, value: currEma });
+          if (i >= 19) smaData.push({ time: baseData[i].time, value: closes.slice(i - 19, i + 1).reduce((a: number, b: number) => a + b) / 20 });
+          ema = closes[i] * (2 / 56) + ema * (54 / 56);
+          if (i >= 54) emaData.push({ time: baseData[i].time, value: ema });
         }
         smaSeriesRef.current?.setData(smaData);
         emaSeriesRef.current?.setData(emaData);
+
+        // ✅ NOW that data is rendered, seed live state and start engine
+        if (baseData.length > 0) {
+          const last = baseData[baseData.length - 1];
+          currentPrice = last.close;
+          targetPrice  = last.close;
+          liveOpen     = last.open;
+          liveHigh     = last.high;
+          liveLow      = last.low;
+        }
+        candleSecs = calcCandleSecs(interval);
+        startLiveEngine();
       } catch {}
 
-      // 7. Tick Engine
-      let currentPrice = baseData[baseData.length-1].close;
-      targetPrice = currentPrice;
-      let hasAlignedLivePrice = false;
-      let candleSecs = 60; 
-      const intMatch = interval.match(/^(\d+)([a-zA-Z]+)$/);
-      if (intMatch) {
-        const val = parseInt(intMatch[1]), unit = intMatch[2];
-        if (unit === "m") candleSecs = val * 60;
-        else if (unit === "h") candleSecs = val * 3600;
-        else if (unit === "d") candleSecs = val * 86400;
-      }
 
-      simInterval = setInterval(() => {
-        if (!isActive || !mainSeries || !chartRef.current) return;
-        const now = Date.now();
-        // ── PURE LIVE TICKS: No artificial wiggling, pure data compilation ──
-        const isFirstLiveTick = !hasAlignedLivePrice && (targetPrice !== currentPrice);
-        if (isFirstLiveTick) hasAlignedLivePrice = true;
 
-        // ---- CONTINUOUS SMOOTH TICK ENGINE ----
-        // Create continuous "liquid" movement towards the target price to prevent "stop-and-go" jerky drawing
-        const distance = targetPrice - currentPrice;
-        if (Math.abs(distance) > 0.00001) {
-           // Slide 20% of the remaining distance per 100ms tick
-           currentPrice += distance * 0.2;
-        } else {
-           // Provide a continuous micro-jiggle (1-2 pips) to simulate orderbook depth buzz
-           const jiggle = (Math.random() - 0.5) * (currentPrice * 0.000015);
-           currentPrice += jiggle;
-           // Add gravity directly back to target so it doesn't drift
-           currentPrice += (targetPrice - currentPrice) * 0.3;
-        }
 
-        setLivePrice(currentPrice);
+      // ── Step 7 (startLiveEngine): Start interval + WebSocket AFTER data is loaded ──
+      const startLiveEngine = () => {
+        let wanderOffset = 0;
+        let wsTicks = 0;
 
-        try {
-          const dataArr = mainSeries.data();
-          if (dataArr && dataArr.length > 0) {
-            const lastData = dataArr[dataArr.length-1] as any;
-            const nowSec = Math.floor(now / 1000);
-            if (nowSec >= lastData.time + candleSecs) {
-              const newCandle = { time: (Math.floor(nowSec/candleSecs)*candleSecs) as UTCTimestamp, open: currentPrice, high: currentPrice, low: currentPrice, close: currentPrice, value: currentPrice };
-              mainSeries.update(newCandle);
-              candlesRef.current.push(newCandle);
-            } else {
-              mainSeries.update({ ...lastData, high: Math.max(lastData.high, currentPrice), low: Math.min(lastData.low, currentPrice), close: currentPrice, value: currentPrice });
-            }
+        // 100ms smooth interpolation toward targetPrice
+        simInterval = setInterval(() => {
+          if (!isActive || !mainSeriesRef.current || !chartRef.current) return;
+          wsTicks++;
+          if (wsTicks < 15) {
+            currentPrice += (targetPrice - currentPrice) * 0.4;
+          } else {
+            const ts = Date.now() / 1200;
+            const drift = (Math.sin(ts * 3.2) + Math.cos(ts * 1.9) + (Math.random() * 2 - 1)) / 3;
+            const pip = targetPrice * 0.000012;
+            wanderOffset += drift * pip;
+            wanderOffset = Math.max(-pip * 5, Math.min(pip * 5, wanderOffset));
+            currentPrice += ((targetPrice + wanderOffset) - currentPrice) * 0.25;
           }
-        } catch {}
-      }, 100);
+          updateLiveCandle(currentPrice);
+        }, 100);
 
-      // WebSockets
-      if (instrument.exchange === "BINANCE" || instrument.symbol === "XAUUSD") {
-        try {
-          const wsSymbol = instrument.symbol === "XAUUSD" ? "paxgusdt" : instrument.symbol.toLowerCase();
-          ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
-            ws.onmessage = (ev) => {
-              if (!isActive || !mainSeries || !chartRef.current) return;
-              const msg = JSON.parse(ev.data);
-              if (msg.e === "kline") {
-                let val = parseFloat(msg.k.c);
-                // Live price handled directly
+        // ── 7a / 7b: Auto-Reconnecting WebSocket with Exponential Backoff ────────
+        // If the connection drops for ANY reason (network, server restart, timeout),
+        // it reconnects after 1s → 2s → 4s → 8s → up to 30s max, indefinitely.
 
-                // ---- REAL-TIME SPIKE / ERROR FIX ----
-                const threshold = Math.max(20, currentPrice * 0.05);
-                if (Math.abs(val - currentPrice) > threshold) return; 
+        let reconnectDelay = 1000;
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-                targetPrice = val; lastWsTime = Date.now();
-                let o = +msg.k.o, h = +msg.k.h, l = +msg.k.l;
-                // Live price handled directly
-                
-                // Secondary check for high/low anomalies
-                if (Math.abs(h - currentPrice) > threshold) h = currentPrice;
-                if (Math.abs(currentPrice - l) > threshold) l = currentPrice;
+        const connectWS = () => {
+          if (!isActive) return;
+          try {
+            if (instrument.exchange === "BINANCE" && instrument.symbol !== "XAUUSD") {
+              // ── Binance kline stream (Crypto only) ──────────────────────────
+              const wsSymbol = instrument.symbol.toLowerCase();
+              ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
 
-                const c = { time:(msg.k.t/1000) as UTCTimestamp, open:o, high:h, low:l, close:val, value:val };
-                const dArr = mainSeries.data();
-                if (dArr.length > 0 && c.time >= dArr[dArr.length-1].time) mainSeries.update(c);
+              ws.onopen = () => { reconnectDelay = 1000; }; // reset backoff on success
+
+              ws.onmessage = (ev) => {
+                if (!isActive) return;
+                try {
+                  const msg = JSON.parse(ev.data);
+                  if (msg.e === "kline") {
+                    const val = parseFloat(msg.k.c);
+                    targetPrice = val;
+                    lastWsTime  = Date.now();
+                    wsTicks     = 0;
+                    updateLiveCandle(val, Math.floor(msg.k.t / 1000), +msg.k.o, +msg.k.h, +msg.k.l);
+                  }
+                } catch {}
+              };
+
+              ws.onclose = () => {
+                if (!isActive) return;
+                reconnectTimer = setTimeout(() => {
+                  reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+                  connectWS();
+                }, reconnectDelay);
+              };
+
+              ws.onerror = () => { try { ws?.close(); } catch {} };
+
+            } else if (instrument.exchange !== "OTC" && instrument.symbol !== "XAUUSD") {
+              // ── TwelveData stream (Forex / Stocks) ───────────────────────────
+              let tdSym = instrument.symbol;
+              if ((instrument.assetClass === "FOREX" || ["XAUUSD","XAGUSD"].includes(tdSym))
+                  && tdSym.length >= 6 && !tdSym.includes("/")) {
+                tdSym = tdSym.substring(0, 3) + "/" + tdSym.substring(3);
               }
-            };
-        } catch {}
-      } else if (instrument.exchange !== "OTC") {
-        try {
-          let tdSymbol = instrument.symbol;
-          if (instrument.assetClass === "FOREX" || ["XAUUSD","XAGUSD"].includes(tdSymbol)) {
-            if (tdSymbol.length>=6 && !tdSymbol.includes("/")) tdSymbol = tdSymbol.substring(0,3)+"/"+tdSymbol.substring(3);
-          }
-          ws = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=b630be1ed9604a29a35ad8d11a8af18c");
-          ws.onopen = () => ws?.send(JSON.stringify({action:"subscribe", params:{symbols:tdSymbol}}));
-          ws.onmessage = (ev) => {
-            if (!isActive || !mainSeries || !chartRef.current) return;
-            const msg = JSON.parse(ev.data);
-            if (msg.event === "price" && msg.price) { 
-              let val = parseFloat(msg.price);
-              // Live price handled directly
 
-              // ---- REAL-TIME SPIKE / ERROR FIX ----
-              const threshold = Math.max(20, currentPrice * 0.05);
-              if (Math.abs(val - currentPrice) > threshold) return; 
+              ws = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=5703b6c3bb53485bbf9b57232c9c59b1");
 
-              targetPrice = val; lastWsTime = Date.now();
+              ws.onopen = () => {
+                reconnectDelay = 1000;
+                ws?.send(JSON.stringify({ action: "subscribe", params: { symbols: tdSym } }));
+              };
+
+              ws.onmessage = (ev) => {
+                if (!isActive) return;
+                try {
+                  const msg = JSON.parse(ev.data);
+                  if (msg.event === "price" && msg.price) {
+                    const val = parseFloat(msg.price);
+                    targetPrice = val;
+                    lastWsTime  = Date.now();
+                    wsTicks     = 0;
+                    updateLiveCandle(val);
+                  }
+                } catch {}
+              };
+
+              ws.onclose = () => {
+                if (!isActive) return;
+                reconnectTimer = setTimeout(() => {
+                  reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+                  connectWS();
+                }, reconnectDelay);
+              };
+
+              ws.onerror = () => { try { ws?.close(); } catch {} };
             }
-          };
-        } catch {}
-      }
-    };
+          } catch {}
+        };
+
+        connectWS(); // initial connection
+
+        // Store cleanup for reconnect timer
+        const origCleanup = simInterval;
+        void origCleanup; // suppress lint
+        const reconnectCleanup = () => {
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+        };
+        // Attach to simInterval slot so cleanup block handles it
+        (simInterval as any).__reconnectCleanup = reconnectCleanup;
+
+      }; // end startLiveEngine
+    }; // end loadData
 
     loadData();
 
-    if (isActive && instrument?.exchange !== "BINANCE" && instrument?.symbol !== "XAUUSD") {
+    // ── Step 8: Polling for XAUUSD (Yahoo Finance spot gold) + non-WS markets ───
+    // XAUUSD uses Yahoo Finance REST (GC=F) for accurate spot gold — NOT PAXGUSDT
+    if (isActive && (instrument?.symbol === "XAUUSD" || instrument?.exchange !== "BINANCE")) {
       const fetchRealPrice = async () => {
         if (!isActive || !chartRef.current) return;
         try {
           const res = await fetch(`/api/market-data/price/${instrument.symbol}`);
           if (res.ok) {
             const data = await res.json();
-            let val = parseFloat(data.price);
-            
-            // ---- REAL-TIME SPIKE / ERROR FIX ----
-            const threshold = Math.max(20, targetPrice * 0.05);
-            if (val > 0 && Math.abs(val - targetPrice) > threshold) return;
-
-            targetPrice = val;
-            lastWsTime = Date.now();
+            const val = parseFloat(data.price);
+            if (val > 0) {
+              targetPrice = val;
+              lastWsTime  = Date.now();
+              updateLiveCandle(val);
+            }
           }
         } catch {}
       };
       fetchRealPrice();
-      poller = setInterval(fetchRealPrice, 15000);
+      // Poll every 2s for XAUUSD (Yahoo Finance), every 2s for others
+      poller = setInterval(fetchRealPrice, 2000);
     }
 
     return () => {
       isActive = false;
+      // Cancel any pending reconnect timers
+      if ((simInterval as any)?.__reconnectCleanup) {
+        (simInterval as any).__reconnectCleanup();
+      }
       if (ws) {
-        if (ws.readyState === 0) {
-           ws.onopen = () => { try { ws?.close(); } catch {} };
-        } else {
-           try { ws.close(); } catch {}
-        }
+        ws.onclose = null; // prevent reconnect from firing after unmount
+        try { ws.close(); } catch {}
       }
       if (simInterval) clearInterval(simInterval);
-      if (poller) clearInterval(poller);
-      try { ro.disconnect(); } catch {}
+      if (poller)      clearInterval(poller);
       abortCtrl.abort();
       
       // Safety: Clear intervals and refs first to stop any pending callbacks
@@ -1123,27 +1301,27 @@ export default function MarketDetail() {
           </div>
 
 
-          {/* Chart canvas — fills ALL remaining height */}
-          <div className="flex-1 min-h-0 w-full relative">
-            <div ref={chartContainerRef} className="absolute inset-0" />
-            
-            {/* Overlay components */}
+          {/* ── Live Chart — TradingView Widget (real candles, all markets) ── */}
+          <div className="flex-1 min-h-0 w-full relative overflow-hidden">
+            {/* TradingView Chart — fills full area, real live candles */}
+            <TradingViewChart
+              symbol={instrument.symbol}
+              timeframe={timeframe}
+              height="100%"
+            />
+
+            {/* Candle close timer overlay */}
             <CandleTimer interval={timeframe} />
+
+            {/* Duration / hover tooltip */}
             {hoverTimeStr && hoverPosition && (
-               <div 
+               <div
                  className="absolute z-[30] pointer-events-none bg-background/90 backdrop-blur-md text-foreground text-[10px] px-2.5 py-1 rounded-md shadow-lg border border-border/50 font-mono whitespace-nowrap transform -translate-x-1/2 mt-4"
                  style={{ left: hoverPosition.x, top: hoverPosition.y }}
                >
                   Duration: <span className="text-primary font-bold">{hoverTimeStr}</span>
                </div>
             )}
-            
-            <QuotexOverlay 
-               chartRef={chartRef}
-               seriesRef={mainSeriesRef}
-               activeTrades={activeTrades}
-               livePrice={displayPrice}
-            />
           </div>
 
           {/* Bottom timeframe bar */}
@@ -1403,8 +1581,23 @@ export default function MarketDetail() {
                       <div className={cn("absolute left-0 top-0 bottom-0 w-1", trade.side === "BUY" ? "bg-emerald-500" : "bg-rose-500")} />
                       <div className="flex items-center justify-between text-xs font-bold mb-1.5 ml-1">
                         <span className="text-white">${amount.toFixed(2)} {trade.side}</span>
-                        <div className={cn("px-2 py-0.5 rounded font-mono", isWin ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
+                        <div className={cn("px-2 py-0.5 rounded font-mono flex items-center gap-2", isWin ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
                           {pnlStr}
+                          <button 
+                            onClick={async () => {
+                              try {
+                                await apiRequest("POST", `/api/timeTrades/${trade.id}/sell`);
+                                queryClient.invalidateQueries({ queryKey: ["/api/timeTrades"] });
+                                queryClient.invalidateQueries({ queryKey: ["/api/wallet/info"] });
+                                toast({ title: "Trade Closed", description: "Position closed manually." });
+                              } catch(e:any) {
+                                toast({ title: "Failed", description: e.message, variant: "destructive" });
+                              }
+                            }}
+                            className="bg-white/10 hover:bg-white/20 text-white rounded px-2 py-0.5 text-[10px] ml-1 uppercase transition-colors"
+                          >
+                            Sell
+                          </button>
                         </div>
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-muted-foreground ml-1">

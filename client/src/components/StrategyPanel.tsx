@@ -165,7 +165,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             if (tdSymbol.length >= 6 && !tdSymbol.includes("/")) tdSymbol = tdSymbol.substring(0, 3) + "/" + tdSymbol.substring(3);
             
             res = await fetch(
-              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=b630be1ed9604a29a35ad8d11a8af18c&outputsize=500`,
+              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=5703b6c3bb53485bbf9b57232c9c59b1&outputsize=500`,
               { signal: ctrl.signal }
             );
           }

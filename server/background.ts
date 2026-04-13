@@ -6,7 +6,7 @@ import { sendWinAlert } from "./sms";
 import { isGlobalMarketOpen } from "@shared/market-hours";
 
 const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
-const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "b630be1ed9604a29a35ad8d11a8af18c";
+const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "5703b6c3bb53485bbf9b57232c9c59b1";
 
 function generateRealisticSparkline(currentPrice: number, changeAbs: number, points = 60): string[] {
   const startPrice = currentPrice - changeAbs;
@@ -21,7 +21,6 @@ function generateRealisticSparkline(currentPrice: number, changeAbs: number, poi
   return sparkline;
 }
 
-// --- Live Trading PnL Utilities ---
 function getFinalResult(trade: any, finalPrice: number) {
   const entryPrice = parseFloat(trade.strikePrice);
   const amount = parseFloat(trade.amount);
@@ -46,7 +45,7 @@ function getFinalResult(trade: any, finalPrice: number) {
 export function startBackgroundTasks() {
   console.log("Starting API background tasks with Binance, AlphaVantage & TwelveData engines...");
 
-  // One-time logo URL migration: replace cryptologos.cc with coincap.io
+
   const LOGO_MAP: Record<string, string> = {
     "BTCUSDT":  "https://assets.coincap.io/assets/icons/btc@2x.png",
     "ETHUSDT":  "https://assets.coincap.io/assets/icons/eth@2x.png",
@@ -137,9 +136,8 @@ export function startBackgroundTasks() {
 
   let isBinanceGeoBlocked = false;
   
-  // 1. Setup Binance WebSocket for Crypto
   function setupBinanceWebsocket() {
-    if (isBinanceGeoBlocked) return; // Shield: don't retry if definitively geo-blocked
+    if (isBinanceGeoBlocked) return;
 
     const ws = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
 
@@ -189,7 +187,7 @@ export function startBackgroundTasks() {
     });
 
     ws.on("error", (err) => {
-      // Institutional Silence: Skip logging 451 geo-blocking as we have simulation fallbacks
+     
       if (err.message.includes("451")) {
          console.warn("[Binance Connectivity] Switching to Institutional Stealth Fallback (Geo-blocked).");
          isBinanceGeoBlocked = true;
@@ -202,11 +200,10 @@ export function startBackgroundTasks() {
 
   setupBinanceWebsocket();
 
-  // 2. Setup periodic polling for Stocks using Alpha vantage
   setInterval(async () => {
     try {
       const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
-      // Absorption Logic: If Binance WS is geoblocked, we absorb Crypto into the polling loop
+    
       const activeInstruments = allInstruments.filter((i: any) => {
          if (i.assetClass === "CRYPTO") return isBinanceGeoBlocked;
          return true;
@@ -217,20 +214,19 @@ export function startBackgroundTasks() {
         let priceData = null;
 
         if (instrument.symbol === "XAUUSD" || instrument.assetClass === "FOREX") {
-          // Priority 0: Binance PAXGUSDT for XAUUSD (High-fidelity Gold spot proxy)
+
           if (instrument.symbol === "XAUUSD") {
             try {
               const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT`);
               const data = await res.json() as any;
               if (data && data.price) {
                 let priceNum = parseFloat(data.price);
-                // Live Price fetch complete
+                
                 priceData = { price: String(priceNum), changeAbs: "0.20", changePct: "0.01" };
               }
             } catch {}
           }
 
-          // Priority 1: TwelveData fallback
           if (!priceData) {
             try {
               const sym = instrument.symbol === "XAUUSD" ? "XAU/USD" : `${instrument.symbol.substring(0,3)}/${instrument.symbol.substring(3,6)}`;
