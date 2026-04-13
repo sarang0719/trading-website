@@ -1,61 +1,68 @@
-import { useEffect, useRef } from "react";
+import { useMemo } from "react";
 
-// Symbol mapping: our internal symbol → TradingView symbol
-const TV_SYMBOL_MAP: Record<string, string> = {
-  // Crypto
-  "BTCUSDT":  "BINANCE:BTCUSDT",
-  "ETHUSDT":  "BINANCE:ETHUSDT",
-  "BNBUSDT":  "BINANCE:BNBUSDT",
-  "SOLUSDT":  "BINANCE:SOLUSDT",
-  "XRPUSDT":  "BINANCE:XRPUSDT",
-  "ADAUSDT":  "BINANCE:ADAUSDT",
-  "DOGEUSDT": "BINANCE:DOGEUSDT",
-  "DOTUSDT":  "BINANCE:DOTUSDT",
-  "AVAXUSDT": "BINANCE:AVAXUSDT",
-  "MATICUSDT":"BINANCE:MATICUSDT",
-  "LTCUSDT":  "BINANCE:LTCUSDT",
-  "LINKUSDT": "BINANCE:LINKUSDT",
-  "UNIUSDT":  "BINANCE:UNIUSDT",
-  "ATOMUSDT": "BINANCE:ATOMUSDT",
-  "TRXUSDT":  "BINANCE:TRXUSDT",
-  // Metals (GoldAPI)
-  "XAUUSD":   "TVC:GOLD",
-  "XAGUSD":   "TVC:SILVER",
-  "WTIUSD":   "TVC:USOIL",
+// ── Symbol mapping: internal → TradingView ────────────────────────────────
+const TV_SYMBOL: Record<string, string> = {
+  // Crypto (Binance)
+  BTCUSDT:  "BINANCE:BTCUSDT",
+  ETHUSDT:  "BINANCE:ETHUSDT",
+  BNBUSDT:  "BINANCE:BNBUSDT",
+  SOLUSDT:  "BINANCE:SOLUSDT",
+  XRPUSDT:  "BINANCE:XRPUSDT",
+  ADAUSDT:  "BINANCE:ADAUSDT",
+  DOGEUSDT: "BINANCE:DOGEUSDT",
+  DOTUSDT:  "BINANCE:DOTUSDT",
+  AVAXUSDT: "BINANCE:AVAXUSDT",
+  MATICUSDT:"BINANCE:MATICUSDT",
+  LTCUSDT:  "BINANCE:LTCUSDT",
+  LINKUSDT: "BINANCE:LINKUSDT",
+  UNIUSDT:  "BINANCE:UNIUSDT",
+  ATOMUSDT: "BINANCE:ATOMUSDT",
+  TRXUSDT:  "BINANCE:TRXUSDT",
+  SHIBUSDT: "BINANCE:SHIBUSDT",
+  PEPEUSDT: "BINANCE:PEPEUSDT",
+  NEARUSDT: "BINANCE:NEARUSDT",
+  // Metals & Commodities
+  XAUUSD:   "TVC:GOLD",
+  XAGUSD:   "TVC:SILVER",
+  WTIUSD:   "TVC:USOIL",
+  BRENTUSD: "TVC:UKOIL",
   // Forex
-  "EURUSD":   "FX:EURUSD",
-  "GBPUSD":   "FX:GBPUSD",
-  "USDJPY":   "FX:USDJPY",
-  "USDCHF":   "FX:USDCHF",
-  "AUDUSD":   "FX:AUDUSD",
-  "NZDUSD":   "FX:NZDUSD",
-  "USDCAD":   "FX:USDCAD",
-  "EURJPY":   "FX:EURJPY",
-  "GBPJPY":   "FX:GBPJPY",
-  "EURGBP":   "FX:EURGBP",
+  EURUSD:   "FX:EURUSD",
+  GBPUSD:   "FX:GBPUSD",
+  USDJPY:   "FX:USDJPY",
+  USDCHF:   "FX:USDCHF",
+  AUDUSD:   "FX:AUDUSD",
+  NZDUSD:   "FX:NZDUSD",
+  USDCAD:   "FX:USDCAD",
+  EURJPY:   "FX:EURJPY",
+  GBPJPY:   "FX:GBPJPY",
+  EURGBP:   "FX:EURGBP",
+  EURAUD:   "FX:EURAUD",
+  GBPAUD:   "FX:GBPAUD",
   // Stocks
-  "AAPL":     "NASDAQ:AAPL",
-  "GOOGL":    "NASDAQ:GOOGL",
-  "MSFT":     "NASDAQ:MSFT",
-  "AMZN":     "NASDAQ:AMZN",
-  "TSLA":     "NASDAQ:TSLA",
-  "META":     "NASDAQ:META",
-  "NVDA":     "NASDAQ:NVDA",
+  AAPL:     "NASDAQ:AAPL",
+  GOOGL:    "NASDAQ:GOOGL",
+  MSFT:     "NASDAQ:MSFT",
+  AMZN:     "NASDAQ:AMZN",
+  TSLA:     "NASDAQ:TSLA",
+  META:     "NASDAQ:META",
+  NVDA:     "NASDAQ:NVDA",
+  NFLX:     "NASDAQ:NFLX",
 };
 
-// Timeframe mapping: our internal → TradingView interval
-const TV_INTERVAL_MAP: Record<string, string> = {
-  "1m": "1",
-  "2m": "2",
-  "3m": "3",
-  "5m": "5",
+// ── Timeframe mapping: internal → TradingView interval ────────────────────
+const TV_INTERVAL: Record<string, string> = {
+  "1m":  "1",
+  "2m":  "2",
+  "3m":  "3",
+  "5m":  "5",
   "15m": "15",
   "30m": "30",
-  "1H": "60",
-  "4H": "240",
-  "1D": "D",
-  "1W": "W",
-  "1M": "M",
+  "1H":  "60",
+  "4H":  "240",
+  "1D":  "D",
+  "1W":  "W",
+  "1M":  "M",
 };
 
 interface TradingViewChartProps {
@@ -69,83 +76,58 @@ export default function TradingViewChart({
   timeframe = "1m",
   height = "100%",
 }: TradingViewChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const scriptRef    = useRef<HTMLScriptElement | null>(null);
+  // Build iframe URL from TradingView widgetembed
+  const iframeSrc = useMemo(() => {
+    const tvSym      = TV_SYMBOL[symbol] ?? `BINANCE:${symbol}`;
+    const tvInterval = TV_INTERVAL[timeframe] ?? "1";
 
-  const tvSymbol   = TV_SYMBOL_MAP[symbol] || `BINANCE:${symbol}`;
-  const tvInterval = TV_INTERVAL_MAP[timeframe] || "1";
+    const params = new URLSearchParams({
+      frameElementId:   `tv_chart_${symbol}`,
+      symbol:           tvSym,
+      interval:         tvInterval,
+      theme:            "dark",
+      style:            "1",          // 1 = Candles
+      locale:           "en",
+      toolbar_bg:       "#0B1120",
+      backgroundColor:  "#0B1120",
+      gridColor:        "rgba(255,255,255,0.04)",
+      hide_top_toolbar: "0",
+      hide_legend:      "0",
+      hide_side_toolbar:"1",
+      allow_symbol_change: "0",
+      save_image:       "0",
+      withdateranges:   "0",
+      hide_volume:      "0",
+      details:          "0",
+      hotlist:          "0",
+      calendar:         "0",
+      studies:          "[]",
+      watchlist:        "[]",
+    });
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Clear previous widget
-    containerRef.current.innerHTML = "";
-
-    // Outer wrapper (needed by TV widget)
-    const wrapper = document.createElement("div");
-    wrapper.className = "tradingview-widget-container";
-    wrapper.style.cssText = "height:100%;width:100%;position:relative;";
-    containerRef.current.appendChild(wrapper);
-
-    // Widget div
-    const widgetDiv = document.createElement("div");
-    widgetDiv.className = "tradingview-widget-container__widget";
-    widgetDiv.style.cssText = "height:100%;width:100%;";
-    wrapper.appendChild(widgetDiv);
-
-    // Copyright div — hidden (no branding shown)
-    const copyrightDiv = document.createElement("div");
-    copyrightDiv.className = "tradingview-widget-copyright";
-    copyrightDiv.style.cssText = "display:none !important;opacity:0;height:0;overflow:hidden;";
-    wrapper.appendChild(copyrightDiv);
-
-    // Build config object
-    const config = {
-      allow_symbol_change: false,
-      autosize: true,
-      calendar: false,
-      details: false,
-      hide_legend: false,
-      hide_side_toolbar: true,
-      hide_top_toolbar: false,
-      hide_volume: false,
-      hotlist: false,
-      interval: tvInterval,
-      locale: "en",
-      save_image: false,
-      style: "1",           // 1 = candles
-      symbol: tvSymbol,
-      theme: "dark",
-      timezone: "Etc/UTC",
-      backgroundColor: "#0B1120",
-      gridColor: "rgba(255,255,255,0.04)",
-      watchlist: [],
-      withdateranges: false,
-      compareSymbols: [],
-      studies: [],
-    };
-
-    // Script tag with config
-    const script = document.createElement("script");
-    script.type = "text/javascript";
-    script.src  = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.innerHTML = JSON.stringify(config);
-    wrapper.appendChild(script);
-    scriptRef.current = script;
-
-    return () => {
-      if (containerRef.current) {
-        containerRef.current.innerHTML = "";
-      }
-    };
-  }, [tvSymbol, tvInterval]);
+    return `https://s.tradingview.com/widgetembed/?${params.toString()}`;
+  }, [symbol, timeframe]);
 
   return (
     <div
-      ref={containerRef}
-      style={{ width: "100%", height, minHeight: 0 }}
-      className="tv-chart-container"
-    />
+      style={{ width: "100%", height, minHeight: 0, position: "relative" }}
+    >
+      <iframe
+        id={`tv_chart_${symbol}`}
+        src={iframeSrc}
+        style={{
+          width: "100%",
+          height: "100%",
+          border: "none",
+          display: "block",
+          backgroundColor: "#0B1120",
+        }}
+        allowFullScreen
+        allow="fullscreen"
+        title="Live Market Chart"
+        loading="eager"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
+    </div>
   );
 }

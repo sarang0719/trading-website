@@ -224,20 +224,21 @@ export default function Markets() {
   }, [instruments.data]);
 
   const filtered = useMemo(() => {
+    const seen = new Set<string>();
     return (instruments.data ?? []).filter((i: any) => {
-      // Search
+      // Deduplicate by symbol (prevent double entries from multiple seed runs)
+      if (seen.has(i.symbol)) return false;
+
+      // Category filter
       if (q && !i.symbol.toLowerCase().includes(q.toLowerCase()) && !i.name.toLowerCase().includes(q.toLowerCase())) {
         return false;
       }
-      
-      // Category specific filtering
-      if (activeCategory === "ALL") return true;
-      if (activeCategory === "CRYPTO" && i.assetClass === "CRYPTO") return true;
-      if (activeCategory === "FOREX" && i.assetClass === "FOREX" && i.exchange !== "OTC") return true;
-      if (activeCategory === "OTC" && i.exchange === "OTC") return true;
-      if (activeCategory === "COMMODITIES" && ["XAUUSD", "XAGUSD", "WTIUSD", "BRENTUSD"].includes(i.symbol)) return true;
-      if (activeCategory === "STOCKS" && ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT"].includes(i.symbol)) return true;
-      
+      if (activeCategory === "ALL") { seen.add(i.symbol); return true; }
+      if (activeCategory === "CRYPTO"      && i.assetClass === "CRYPTO") { seen.add(i.symbol); return true; }
+      if (activeCategory === "FOREX"       && i.assetClass === "FOREX"  && !["XAUUSD","XAGUSD","WTIUSD","BRENTUSD"].includes(i.symbol)) { seen.add(i.symbol); return true; }
+      if (activeCategory === "OTC"         && i.exchange === "OTC") { seen.add(i.symbol); return true; }
+      if (activeCategory === "COMMODITIES" && ["XAUUSD","XAGUSD","WTIUSD","BRENTUSD"].includes(i.symbol)) { seen.add(i.symbol); return true; }
+      if (activeCategory === "STOCKS"      && ["AAPL","TSLA","AMZN","GOOGL","MSFT","NVDA","META","NFLX"].includes(i.symbol)) { seen.add(i.symbol); return true; }
       return false;
     });
   }, [instruments.data, activeCategory, q]);

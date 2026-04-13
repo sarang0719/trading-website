@@ -652,75 +652,80 @@ export default function MarketDetail() {
     let poller: any = null;
     const abortCtrl = new AbortController();
 
-    // 1. Create chart
+    // 1. Create chart — TradingView-identical visual config
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "rgba(156,163,175,1)",
+        textColor: "rgba(209,213,219,0.9)",
+        fontSize: 11,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.04)" },
-        horzLines: { color: "rgba(255,255,255,0.04)" },
+        vertLines: { color: "rgba(255,255,255,0.05)" },
+        horzLines: { color: "rgba(255,255,255,0.05)" },
       },
-      crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { 
-        borderColor: "rgba(255,255,255,0.08)",
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: "rgba(156,163,175,0.4)", labelBackgroundColor: "#2b2f3a" },
+        horzLine: { color: "rgba(156,163,175,0.4)", labelBackgroundColor: "#2b2f3a" },
+      },
+      rightPriceScale: {
+        borderColor: "rgba(255,255,255,0.06)",
         autoScale: true,
-        scaleMargins: {
-          top: 0.1,
-          bottom: 0.2, // increased bottom margin slightly
-        },
+        scaleMargins: { top: 0.08, bottom: 0.12 },
       },
-      timeScale: { 
-        borderColor: "rgba(255,255,255,0.08)", 
-        timeVisible: true, 
+      timeScale: {
+        borderColor: "rgba(255,255,255,0.06)",
+        timeVisible: true,
         secondsVisible: false,
-        rightOffset: 12, // match TradingView standard right offset
-        barSpacing: 8,   // slightly wider candles by default like TradingView
-        minBarSpacing: 1.5, // prevent "unsized/dot" candles when zoomed all the way out
+        rightOffset: 12,
+        barSpacing: 8,
+        minBarSpacing: 1,
         fixLeftEdge: false,
         fixRightEdge: false,
       },
-      autoSize: true, // Native responsive sizing, replaces clientWidth/clientHeight logic
+      autoSize: true,
     });
 
-    // 2. Add main series based on chart type
+    // 2. Add main series — TradingView-identical colors (teal-green + red)
+    // TV green: #26a69a  TV red: #ef5350
     let mainSeries: any;
     if (chartType === "candle" || chartType === "hollow" || chartType === "heikin") {
       const hollow = chartType === "hollow";
       mainSeries = chart.addSeries(CandlestickSeries, {
-        upColor:        hollow ? "transparent" : "#0ecb81",
-        downColor:      "#f6465d",
-        borderVisible:  hollow,
-        borderUpColor:  "#0ecb81",
-        borderDownColor:"#f6465d",
-        wickUpColor:    "#0ecb81",
-        wickDownColor:  "#f6465d",
+        upColor:         hollow ? "transparent" : "#26a69a",
+        downColor:       "#ef5350",
+        borderVisible:   true,
+        borderUpColor:   "#26a69a",
+        borderDownColor: "#ef5350",
+        wickUpColor:     "#26a69a",
+        wickDownColor:   "#ef5350",
+        wickVisible:     true,
       });
     } else if (chartType === "bar") {
-      mainSeries = chart.addSeries(BarSeries, { upColor: "#0ecb81", downColor: "#f6465d" });
+      mainSeries = chart.addSeries(BarSeries, { upColor: "#26a69a", downColor: "#ef5350" });
     } else if (chartType === "area") {
       mainSeries = chart.addSeries(AreaSeries, {
-        lineColor: "#2962FF", topColor: "rgba(41,98,255,0.4)",
-        bottomColor: "rgba(41,98,255,0)", lineWidth: 2,
+        lineColor: "#2962FF", topColor: "rgba(41,98,255,0.35)",
+        bottomColor: "rgba(41,98,255,0.0)", lineWidth: 2,
       });
     } else if (chartType === "baseline") {
       mainSeries = chart.addSeries(BaselineSeries, {
         baseValue: { type: "price", price: 0 },
-        topLineColor: "#0ecb81", topFillColor1: "rgba(14,203,129,0.28)",
-        topFillColor2: "rgba(14,203,129,0.05)",
-        bottomLineColor: "#f6465d", bottomFillColor1: "rgba(246,70,93,0.05)",
-        bottomFillColor2: "rgba(246,70,93,0.28)",
+        topLineColor:     "#26a69a", topFillColor1:    "rgba(38,166,154,0.28)",
+        topFillColor2:    "rgba(38,166,154,0.05)",
+        bottomLineColor:  "#ef5350", bottomFillColor1: "rgba(239,83,80,0.05)",
+        bottomFillColor2: "rgba(239,83,80,0.28)",
       });
     } else if (chartType === "line" || chartType === "stepline") {
       mainSeries = chart.addSeries(LineSeries, {
-        color: "#3b82f6", lineWidth: 2,
+        color: "#2962FF", lineWidth: 2,
         lineType: chartType === "stepline" ? 1 : 0,
       });
     } else {
-      mainSeries = chart.addSeries(HistogramSeries, { color: "#3b82f6" });
+      mainSeries = chart.addSeries(HistogramSeries, { color: "#26a69a" });
     }
+
 
     // 3. Volume overlay
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -1301,19 +1306,15 @@ export default function MarketDetail() {
           </div>
 
 
-          {/* ── Live Chart — TradingView Widget (real candles, all markets) ── */}
-          <div className="flex-1 min-h-0 w-full relative overflow-hidden">
-            {/* TradingView Chart — fills full area, real live candles */}
-            <TradingViewChart
-              symbol={instrument.symbol}
-              timeframe={timeframe}
-              height="100%"
-            />
+          {/* ── Live Chart Canvas — Lightweight Charts Engine ── */}
+          <div className="flex-1 min-h-0 w-full relative">
+            {/* Main chart canvas — chart engine mounts here */}
+            <div ref={chartContainerRef} className="absolute inset-0" />
 
             {/* Candle close timer overlay */}
             <CandleTimer interval={timeframe} />
 
-            {/* Duration / hover tooltip */}
+            {/* Duration hover tooltip */}
             {hoverTimeStr && hoverPosition && (
                <div
                  className="absolute z-[30] pointer-events-none bg-background/90 backdrop-blur-md text-foreground text-[10px] px-2.5 py-1 rounded-md shadow-lg border border-border/50 font-mono whitespace-nowrap transform -translate-x-1/2 mt-4"
@@ -1322,6 +1323,24 @@ export default function MarketDetail() {
                   Duration: <span className="text-primary font-bold">{hoverTimeStr}</span>
                </div>
             )}
+
+            {/* Zoom controls */}
+            <div className="absolute right-4 bottom-[100px] z-[30] flex flex-col gap-2">
+               <button onClick={handleToggleAutoScale} title="Auto-Scale" className="w-8 h-8 rounded-full bg-[#161a25]/90 hover:bg-[#1f2433] border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all font-bold text-xs uppercase">A</button>
+               <button onClick={handleResetFit} title="Fit to Screen" className="w-8 h-8 rounded-full bg-[#161a25]/90 hover:bg-[#1f2433] border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all"><Maximize className="w-3.5 h-3.5" /></button>
+               <div className="flex flex-col bg-[#161a25]/90 border border-white/10 rounded-full shadow-xl overflow-hidden">
+                   <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 hover:bg-[#1f2433] flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Plus className="w-4 h-4" /></button>
+                   <div className="h-px bg-white/10 w-full" />
+                   <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 hover:bg-[#1f2433] flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Minus className="w-4 h-4" /></button>
+               </div>
+            </div>
+
+            <QuotexOverlay
+               chartRef={chartRef}
+               seriesRef={mainSeriesRef}
+               activeTrades={activeTrades}
+               livePrice={displayPrice}
+            />
           </div>
 
           {/* Bottom timeframe bar */}
