@@ -351,8 +351,8 @@ export default function Strategy() {
   }, [openTrade, price]);
 
   return (
-    <AppShell title="Auto-Bot" subtitle="QuantEdge Pro v9.0 — AI-powered automated trading engine">
-      <Seo title="AI Auto-Bot • QuantEdge Pro v9.0" description="Automated paper trading bot powered by the QuantEdge Pro v9.0 strategy engine." />
+    <AppShell title="Auto-Bot" subtitle="QUANTEDGE V12.1 · SMC — AI-powered automated trading engine">
+      <Seo title="AI Auto-Bot • QUANTEDGE V12.1 · SMC" description="Automated paper trading bot powered by the QUANTEDGE V12.1 · SMC strategy engine." />
 
       <div className="space-y-5 pb-12">
 
@@ -367,7 +367,7 @@ export default function Strategy() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-lg">QuantEdge Auto-Bot</span>
+                  <span className="font-bold text-lg">QUANTEDGE V12.1 · SMC Auto-Bot</span>
                   <span className={cn(
                     "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-widest",
                     bot.running ? "bg-emerald-500/20 text-emerald-400 animate-pulse" : "bg-muted/50 text-muted-foreground"

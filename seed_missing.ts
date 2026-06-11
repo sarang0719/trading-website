@@ -31,7 +31,7 @@ async function main() {
             console.log("Inserting missing instrument:", item.symbol);
             const inserted = await db.insert(instruments).values(item).returning();
 
-            const priceRows = inserted.map((inst) => {
+            const priceRows = inserted.map((inst: { id: number }) => {
                 const base = 150;
                 const price = base + Math.random() * base * 0.2;
                 const changeAbs = (Math.random() - 0.5) * base * 0.05;

@@ -128,10 +128,10 @@ export default function AIInsights() {
       <div className="space-y-6">
         <SmartAutoPilot />
 
-        {/* ─── QuantEdge Pro Scanner ─── */}
+        {/* ─── QUANTEDGE V12.1 · SMC Scanner ─── */}
         <div className="glass rounded-3xl border border-border/60 p-5 shadow-luxe">
           <div className="flex items-center gap-2 mb-4">
-            <span className="text-base font-bold">⚡ QuantEdge Pro v9.0 Scanner</span>
+            <span className="text-base font-bold">⚡ QUANTEDGE V12.1 · SMC Scanner</span>
             <span className="text-[10px] uppercase tracking-widest bg-primary/20 text-primary px-2 py-0.5 rounded-full">AI Strategy</span>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 mb-5">

@@ -35,7 +35,7 @@ export default function AIConsentModal() {
       setOpen(false);
       toast({
          title: enabled ? "AI Auto-Pilot Enabled" : "AI Auto-Pilot Disabled",
-         description: enabled ? "The QuantEdge bot will now trade for you in the background." : "You can always enable it later from the AI Insights dashboard."
+         description: enabled ? "The QUANTEDGE V12.1 · SMC bot will now trade for you in the background." : "You can always enable it later from the AI Insights dashboard."
       });
     },
   });
@@ -51,7 +51,7 @@ export default function AIConsentModal() {
           <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(var(--primary-rgb),0.3)]">
             <Bot className="w-8 h-8 text-primary" />
           </div>
-          <DialogTitle className="text-2xl text-center mb-2">QuantEdge v12.0 Institutional AI</DialogTitle>
+          <DialogTitle className="text-2xl text-center mb-2">QUANTEDGE V12.1 · SMC Institutional AI</DialogTitle>
           <DialogDescription className="text-center text-base">
             We have integrated a state-of-the-art algorithmic trading bot capable of placing high-probability <strong>Buy</strong> and <strong>Sell</strong> trades entirely in the background. 
           </DialogDescription>

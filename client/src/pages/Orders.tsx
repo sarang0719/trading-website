@@ -1,205 +1,146 @@
 import { useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import Seo from "@/components/Seo";
-import { useOrders, useCancelOrder } from "@/hooks/use-orders";
+import { useTimeTrades } from "@/hooks/use-time-trades";
 import { useToast } from "@/hooks/use-toast";
-import { isUnauthorizedError, redirectToLogin } from "@/lib/auth-utils";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import EmptyState from "@/components/EmptyState";
-import ConfirmDialog from "@/components/ConfirmDialog";
-import { Link } from "wouter";
-import { Ban, Plus, Search, TriangleAlert } from "lucide-react";
+import { Ban, Search, TrendingUp, TrendingDown, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 function fmt(n: any) {
   if (n == null) return "—";
   const num = Number(n);
   if (Number.isNaN(num)) return String(n);
-  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(num);
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 4 }).format(num);
 }
 
 export default function Orders() {
   const { toast } = useToast();
-  const q = useOrders();
-  const cancel = useCancelOrder();
-
+  const { data: trades, isLoading } = useTimeTrades();
   const [search, setSearch] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [cancelId, setCancelId] = useState<number | null>(null);
 
   const list = useMemo(() => {
-    const items = Array.isArray(q.data) ? q.data : [];
+    const items = Array.isArray(trades) ? trades : [];
+    // Sort so newest are first
+    const sorted = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
     const s = search.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter((o) => {
+    if (!s) return sorted;
+    return sorted.filter((o) => {
       const id = String(o.id);
       const side = String(o.side ?? "").toLowerCase();
-      const type = String(o.type ?? "").toLowerCase();
       const status = String(o.status ?? "").toLowerCase();
-      return id.includes(s) || side.includes(s) || type.includes(s) || status.includes(s);
+      return id.includes(s) || side.includes(s) || status.includes(s);
     });
-  }, [q.data, search]);
-
-  async function doCancel() {
-    if (!cancelId) return;
-    try {
-      await cancel.mutateAsync(cancelId);
-      toast({ title: "Order cancelled", description: `Order #${cancelId} has been cancelled.` });
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      if (isUnauthorizedError(err)) return redirectToLogin(toast as any);
-      toast({ title: "Couldn’t cancel order", description: err.message, variant: "destructive" as any });
-    } finally {
-      setConfirmOpen(false);
-      setCancelId(null);
-    }
-  }
+  }, [trades, search]);
 
   return (
-    <AppShell title="Orders" subtitle="Review your paper order history and manage pending orders.">
-      <Seo title="Orders • HTC Trade" description="Orders list, cancel workflows." />
+    <AppShell title="Trading History" subtitle="Review your active and closed binary options trades.">
+      <Seo title="Trading History • HTC Trade" description="Your full trading record." />
 
       <div className="glass rounded-3xl border border-border/60 p-4 sm:p-5 shadow-luxe">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              data-testid="orders-search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by id, status, side, type…"
-              className="pl-10 rounded-2xl bg-background/50"
+              placeholder="Search by id, status, side..."
+              className="pl-10 rounded-2xl bg-background/50 h-11 border-border/50"
             />
           </div>
-
-          <Link
-            href="/app/orders/new"
-            data-testid="orders-new"
-            className="
-              inline-flex items-center justify-center
-              rounded-2xl px-4 py-2.5 text-sm font-semibold
-              bg-gradient-to-r from-primary to-primary/85
-              text-primary-foreground
-              shadow-lg shadow-primary/20
-              hover:shadow-xl hover:shadow-primary/25 hover:-translate-y-0.5
-              active:translate-y-0
-              transition-all duration-300 ease-out
-            "
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New order
-          </Link>
         </div>
 
-        <div className="mt-4">
-          {q.isLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Skeleton key={i} className="h-16 rounded-2xl" />
+        <div className="mt-6">
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 rounded-2xl bg-white/5" />
               ))}
             </div>
-          ) : q.isError ? (
-            <EmptyState
-              data-testid="orders-error"
-              icon={<TriangleAlert className="h-6 w-6 text-destructive" />}
-              title="Couldn’t load orders"
-              description="Try again, or check backend routes."
-              action={
-                <Button type="button" onClick={() => q.refetch()} data-testid="orders-retry" className="rounded-2xl">
-                  Retry
-                </Button>
-              }
-            />
           ) : list.length === 0 ? (
             <EmptyState
-              data-testid="orders-empty"
-              icon={<Ban className="h-6 w-6 text-primary" />}
-              title="No orders yet"
-              description="Place a paper order to start building your track record."
-              action={
-                <Link
-                  href="/app/orders/new"
-                  data-testid="orders-empty-new"
-                  className="
-                    inline-flex items-center justify-center
-                    rounded-2xl px-4 py-2.5 text-sm font-semibold
-                    bg-gradient-to-r from-primary to-primary/85
-                    text-primary-foreground
-                    shadow-lg shadow-primary/20
-                    hover:shadow-xl hover:shadow-primary/25 hover:-translate-y-0.5
-                    active:translate-y-0
-                    transition-all duration-300 ease-out
-                  "
-                >
-                  Create order
-                </Link>
-              }
+              icon={<Ban className="h-8 w-8 text-primary" />}
+              title="No trades yet"
+              description="You haven't placed any trades. Go to the Markets page to start trading."
             />
           ) : (
-            <div className="space-y-2">
-              {list.map((o: any) => {
-                const pending = o.status === "PENDING";
-                const filled = o.status === "FILLED";
-                const rejected = o.status === "REJECTED";
-                const pill =
-                  filled ? "bg-accent/12 text-accent border-accent/20" :
-                  rejected ? "bg-destructive/12 text-destructive border-destructive/20" :
-                  pending ? "bg-primary/12 text-primary border-primary/20" :
-                  "bg-muted/60 text-foreground border-border/60";
-
+            <div className="space-y-3">
+              {list.map((trade: any) => {
+                const isActive = trade.status === "ACTIVE";
+                const isWin = trade.status === "WIN";
+                const isLoss = trade.status === "LOSS";
+                const isTie = trade.status === "TIE";
+                const side = trade.side as "BUY" | "SELL";
+                const payoutRatio = parseFloat(trade.payoutRatio);
+                const amount = parseFloat(trade.amount);
+                
+                const profit = isWin ? amount * payoutRatio : (isLoss ? -amount : 0);
+                
                 return (
                   <div
-                    key={o.id}
-                    data-testid={`order-row-${o.id}`}
-                    className="
-                      rounded-2xl border border-border/60 bg-background/40 p-3
-                      transition-all duration-300 ease-out
-                      hover:-translate-y-0.5 hover:shadow-md hover:bg-background/55
-                    "
+                    key={trade.id}
+                    className={cn(
+                      "rounded-2xl border bg-background/40 p-4 transition-all duration-300 relative overflow-hidden",
+                      isActive ? "border-primary/40 shadow-[0_0_15px_rgba(185,95,55,0.1)]" : "border-border/40"
+                    )}
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold">Order #{o.id}</span>
-                          <span className={cn("text-[11px] font-semibold px-2.5 py-1 rounded-full border", pill)}>
-                            {o.status}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(o.createdAt).toLocaleString()}
-                          </span>
+                    {isActive && (
+                       <div className="absolute top-0 right-0 p-1.5 px-3 bg-primary/20 text-primary text-[9px] font-black uppercase tracking-widest rounded-bl-xl">
+                          Live Order
+                       </div>
+                    )}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className={cn(
+                          "w-12 h-12 rounded-xl grid place-items-center shadow-lg",
+                          side === "BUY" ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
+                        )}>
+                          {side === "BUY" ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
                         </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {o.side} • {o.type} • Qty {fmt(o.quantity)} • Portfolio {o.portfolioId} • Instrument {o.instrumentId}
+                        <div>
+                          <div className="flex items-center gap-2">
+                             <span className="text-sm font-bold uppercase tracking-widest">{side} ORDER</span>
+                             <span className="text-muted-foreground text-xs font-mono">#{trade.id}</span>
+                          </div>
+                          <div className="text-xs font-medium text-muted-foreground mt-1 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" /> 
+                            {trade.durationSeconds}s Expiry • {new Date(trade.createdAt).toLocaleString()}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <div className="text-right mr-2">
-                          <div className="text-xs text-muted-foreground">Limit / Stop</div>
-                          <div className="text-sm font-semibold">
-                            {o.limitPrice != null ? fmt(o.limitPrice) : "—"} / {o.stopPrice != null ? fmt(o.stopPrice) : "—"}
-                          </div>
+                      <div className="grid grid-cols-2 lg:flex items-center gap-4 lg:gap-12 text-sm">
+                        <div className="flex flex-col">
+                           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Entry</span>
+                           <span className="font-mono font-bold">{fmt(trade.strikePrice)}</span>
                         </div>
-
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          data-testid={`order-cancel-${o.id}`}
-                          onClick={() => {
-                            setCancelId(o.id);
-                            setConfirmOpen(true);
-                          }}
-                          disabled={!pending || cancel.isPending}
-                          className="
-                            rounded-2xl
-                            border border-border/60 bg-background/60
-                            disabled:opacity-50
-                          "
-                        >
-                          Cancel
-                        </Button>
+                        <div className="flex flex-col">
+                           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Close</span>
+                           <span className="font-mono font-bold">{isActive ? "—" : fmt(trade.settlePrice)}</span>
+                        </div>
+                        <div className="flex flex-col">
+                           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Investment</span>
+                           <span className="font-mono font-bold">${amount.toFixed(2)}</span>
+                        </div>
+                        
+                        <div className="flex flex-col items-end min-w-[80px]">
+                           <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Payout</span>
+                           {isActive ? (
+                             <span className="font-mono font-bold text-primary animate-pulse text-lg">PENDING</span>
+                           ) : isTie ? (
+                             <span className="font-mono font-bold text-muted-foreground text-lg">$0.00</span>
+                           ) : (
+                             <span className={cn(
+                               "font-mono font-bold text-lg",
+                               isWin ? "text-emerald-500" : "text-rose-500"
+                             )}>
+                               {isWin ? "+" : "-"}${Math.abs(profit).toFixed(2)}
+                             </span>
+                           )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -209,17 +150,6 @@ export default function Orders() {
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title="Cancel this order?"
-        description={`This will attempt to cancel order #${cancelId ?? ""}.`}
-        confirmText={cancel.isPending ? "Cancelling…" : "Cancel order"}
-        confirmVariant="destructive"
-        onConfirm={doCancel}
-        data-testid="orders-cancel-confirm"
-      />
     </AppShell>
   );
 }

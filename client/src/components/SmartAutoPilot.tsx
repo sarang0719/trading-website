@@ -43,7 +43,7 @@ export default function SmartAutoPilot() {
       }));
       toast({ 
         title: vars.enabled ? "AI Auto-Pilot Activated" : "AI Settings Updated",
-        description: vars.enabled ? `QuantEdge v12.0 is actively trading $${vars.amount || customAmount} sizes.` : "Background market scans have been halted."
+        description: vars.enabled ? `QUANTEDGE V12.1 · SMC is actively trading $${vars.amount || customAmount} sizes.` : "Background market scans have been halted."
       });
     },
   });
@@ -85,13 +85,13 @@ export default function SmartAutoPilot() {
             <div className="flex items-center gap-3 mb-1">
                <span className="text-lg font-black flex items-center gap-2 tracking-tighter">
                   <Bot className="w-5 h-5 text-primary" />
-                  Smart Auto-Pilot (QuantEdge v12.0)
+                  Smart Auto-Pilot (QUANTEDGE V12.1 · SMC)
                </span>
                <div className="flex gap-2">
                  <span className={`text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-full ${isEnabled ? 'bg-primary/20 text-primary animate-pulse border border-primary/20' : 'bg-muted text-muted-foreground'}`}>
                     {isEnabled ? "System Active" : "Standby"}
                  </span>
-                 {["saran123@gmail.com", "htctrade@gmail.com"].includes((user?.email || "").toLowerCase()) && (
+                 {["saran123@gmail.com", "htctrade123@gmail.com"].includes((user?.email || "").toLowerCase()) && (
                    <span className="text-[10px] uppercase font-black tracking-widest px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/20">
                       Institutional Admin Mode
                    </span>

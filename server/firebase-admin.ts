@@ -22,6 +22,9 @@ function ensureInitialized() {
      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         try {
            serviceAccountData = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+           if (serviceAccountData.private_key) {
+              serviceAccountData.private_key = serviceAccountData.private_key.replace(/\\n/g, '\n');
+           }
         } catch (e) {
            console.error("[Firebase] Error parsing FIREBASE_SERVICE_ACCOUNT env var. Ensure it is valid JSON.");
         }

@@ -28,7 +28,7 @@ export async function setupAuth(app: Express) {
   const MemStore = MemoryStore(session);
 
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "trading-platform-secret",
+    secret: process.env.SESSION_SECRET || (() => { throw new Error("SESSION_SECRET environment variable is required"); })(),
     resave: false,
     saveUninitialized: false,
     store: new MemStore({

@@ -36,7 +36,13 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
   const { user, logout, isLoggingOut } = useAuth();
 
 
-  const isAdmin = user?.email && ["saran123@gmail.com", "htctrade@gmail.com"].includes(user.email.toLowerCase());
+  const isAdmin = useMemo(() => {
+    if (!user) return false;
+    const adminEmails = ["saran123@gmail.com", "htctrade123@gmail.com"];
+    return adminEmails.includes((user.email || "").toLowerCase()) || 
+           user.role === "ADMIN_1" || 
+           user.role === "ADMIN_2";
+  }, [user]);
 
   const nav: NavItem[] = useMemo(
     () => {

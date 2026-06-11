@@ -1,5 +1,5 @@
 /**
- * QuantEdge Pro v9.0 – Auto-Bot Engine
+ * QUANTEDGE V12.1 · SMC – Auto-Bot Engine
  * Runs parameter optimisation + live paper-trade execution
  */
 

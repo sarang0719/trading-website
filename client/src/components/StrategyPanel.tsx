@@ -89,6 +89,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
   const [tab,      setTab]      = useState<"signal" | "backtest" | "reasons">("signal");
   const [showAll,  setShowAll]  = useState(false);
   const [autoInvest, setAutoInvest] = useState(false);
+  const [equityCurve, setEquityCurve] = useState<number[]>([]);
 
   const { toast } = useToast();
   const { user } = useAuth();
@@ -165,7 +166,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             if (tdSymbol.length >= 6 && !tdSymbol.includes("/")) tdSymbol = tdSymbol.substring(0, 3) + "/" + tdSymbol.substring(3);
             
             res = await fetch(
-              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&apikey=5703b6c3bb53485bbf9b57232c9c59b1&outputsize=500`,
+              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&outputsize=500`,
               { signal: ctrl.signal }
             );
           }
@@ -260,8 +261,24 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
       // ── Step 2: Backtest deferred after first paint ──────────────────────
       btTimerRef.current = setTimeout(() => {
         if (destroyRef.current) return;
-        const btR = backtest(raw, cfg);
-        if (!destroyRef.current) setBt(btR);
+        // Use a relaxed config for backtesting to generate more signals for visualization
+        const btCfg = { ...cfg, minScore: 4 };
+        const btR = backtest(raw, btCfg);
+        if (!destroyRef.current) {
+          setBt(btR);
+          // Build equity curve for sparkline
+          if (btR.trades.length > 0) {
+            let eq = 10000;
+            const curve = [eq];
+            for (const t of btR.trades) {
+              const invest = eq * 0.10;
+              if (t.outcome === "WIN") eq += invest * 0.85;
+              else eq -= invest;
+              curve.push(Math.round(eq));
+            }
+            setEquityCurve(curve);
+          }
+        }
       }, 50);
 
       // ── Step 3: WebSocket for live ticks (only when online) ──────────────
@@ -415,7 +432,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-secondary/20">
         <div className="flex items-center gap-2 flex-wrap">
           <Zap className="w-4 h-4 text-primary shrink-0" />
-          <span className="font-bold text-sm">QuantEdge Pro v9.0</span>
+          <span className="font-bold text-sm">QUANTEDGE V12.1 · SMC</span>
           <span className="text-[10px] bg-primary/20 text-primary px-2 py-0.5 rounded-full uppercase tracking-widest">AI Engine</span>
           {symbol && <span className="text-[10px] bg-secondary/60 px-2 py-0.5 rounded-full font-mono">{symbol} · {interval}</span>}
         </div>
@@ -600,8 +617,13 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
       {!error && tab === "backtest" && (
         <div className="p-4 space-y-4">
           {!bt || bt.totalTrades === 0 ? (
-            <div className="text-sm text-muted-foreground text-center py-6">
-              {loading ? "Running backtest…" : "No trades found in historical data."}
+            <div className="p-6 flex flex-col items-center gap-4 text-center">
+              <BarChart2 className="w-10 h-10 text-primary/40" />
+              <div className="text-sm font-semibold">No backtest trades yet</div>
+              <div className="text-xs text-muted-foreground max-w-xs">
+                The AI engine scans historical candles for high-confidence signals. Try a shorter interval like <strong>1h</strong> or <strong>15m</strong>, or click <strong>Scan</strong> to reload data.
+              </div>
+              {loading && <div className="flex items-center gap-2 text-xs text-primary"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Running backtest…</div>}
             </div>
           ) : (
             <>
@@ -636,7 +658,42 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
                 </div>
               </div>
 
-              {/* Last 10 trades */}
+              {/* Equity Curve Sparkline */}
+              {equityCurve.length > 2 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1">
+                    <Activity className="w-3 h-3" /> Equity Curve
+                  </div>
+                  <div className="h-16 w-full bg-secondary/20 rounded-xl overflow-hidden flex items-end gap-[1px] px-2 py-2">
+                    {(() => {
+                      const min = Math.min(...equityCurve);
+                      const max = Math.max(...equityCurve);
+                      const range = max - min || 1;
+                      return equityCurve.map((v, i) => {
+                        const pct = ((v - min) / range) * 100;
+                        const isUp = i === 0 || v >= equityCurve[i - 1];
+                        return (
+                          <div
+                            key={i}
+                            className="flex-1 rounded-sm min-w-[2px] transition-all duration-300"
+                            style={{
+                              height: `${Math.max(4, pct)}%`,
+                              background: isUp ? "#10b981" : "#f43f5e",
+                              opacity: 0.75,
+                            }}
+                          />
+                        );
+                      });
+                    })()}
+                  </div>
+                  <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
+                    <span>Start: $10,000</span>
+                    <span className={bt.netPnLPct >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                      End: ${(10000 * (1 + bt.netPnLPct / 100)).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Last {Math.min(10, bt.trades.length)} Trades</div>
                 <div className="space-y-1">

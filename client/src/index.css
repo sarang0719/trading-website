@@ -11,6 +11,56 @@
   --font-serif: "Fraunces", ui-serif, Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
+  /* Light Theme (TradingView Light Style) */
+  --background: 0 0% 100%; /* #ffffff */
+  --foreground: 224 20% 15%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 224 20% 15%;
+  --card-border: 214 32% 91%; /* #e2e8f0 */
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 224 20% 15%;
+  --popover-border: 214 32% 91%;
+
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  --ring: 224 100% 58%; /* #2962FF */
+
+  --primary: 224 100% 58%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96.1%; /* #f1f5f9 */
+  --secondary-foreground: 224 20% 15%;
+
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215 16% 47%; /* #64748b */
+
+  --accent: 170 90% 32%; /* #089981 */
+  --accent-foreground: 0 0% 100%;
+
+  --destructive: 355 89% 58%; /* #F23645 */
+  --destructive-foreground: 0 0% 100%;
+
+  --sidebar: 0 0% 100%;
+  --sidebar-foreground: 224 20% 15%;
+  --sidebar-border: 214 32% 91%;
+  --sidebar-primary: 224 100% 58%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 40% 96.1%;
+  --sidebar-accent-foreground: 224 20% 15%;
+  --sidebar-ring: 224 100% 58%;
+
+  --chart-1: 224 100% 58%;
+  --chart-2: 170 90% 32%;
+  --chart-3: 355 89% 58%;
+  --chart-4: 31 90% 55%;
+  --chart-5: 262 83% 65%;
+
+  --radius: 0.5rem;
+}
+
+.dark {
   /* TradingView Exact Dark Theme Palette */
   --background: 223 28% 10%; /* #131722 */
   --foreground: 210 40% 98%;
@@ -58,8 +108,6 @@
   --chart-3: 355 89% 58%;
   --chart-4: 31 90% 55%;
   --chart-5: 262 83% 65%;
-
-  --radius: 0.5rem;
 }
 
 @layer base {

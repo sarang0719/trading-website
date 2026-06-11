@@ -4,9 +4,31 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { startBackgroundTasks } from "./background";
 import { startAiBotEngine } from "./ai-bot";
+import { setupWebSocket } from "./websocket";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: false,
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5000, // limit each IP to 5000 requests per windowMs to allow polling
+  message: { error: "Too many requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api", limiter);
 
 declare module "http" {
   interface IncomingMessage {
@@ -73,6 +95,14 @@ app.use((req, res, next) => {
     // PHASE 1: Immediate API & Static Readiness
     await registerRoutes(httpServer, app);
     
+    // Setup WebSocket server
+    const wsManager = setupWebSocket(httpServer);
+    httpServer.on('upgrade', (req, socket, head) => {
+      if (req.url === '/ws') {
+        wsManager.handleUpgrade(req, socket, head);
+      }
+    });
+    
     if (process.env.NODE_ENV === "production") {
       serveStatic(app);
     } else {
@@ -88,51 +118,61 @@ app.use((req, res, next) => {
       });
     }
 
-    // PHASE 3: Asynchronous Background Initialization
-    (async () => {
+    // PHASE 3: Non-blocking Background Initialization
+    setTimeout(() => {
        try {
          startBackgroundTasks();
          startAiBotEngine();
          log("Institutional background engines active.");
 
-          // PHASE 4: Immediate Institutional Market Sync & Price Correction
-          try {
-            const { isGlobalMarketOpen } = await import("../shared/market-hours");
-            const { instruments, latestPrices } = await import("../shared/schema");
-            const { eq } = await import("drizzle-orm");
-            const { db } = await import("./db");
-            const allInsts = await db.select().from(instruments);
-            for (const inst of allInsts) {
-              const isOpen = isGlobalMarketOpen(inst.assetClass, inst.symbol);
-              let updateData: any = { isOpen, asOf: new Date() };
+          // PHASE 4: Market Sync - Moved to background with delay
+          setTimeout(async () => {
+            try {
+              const { isGlobalMarketOpen } = await import("../shared/market-hours");
+              const { instruments, latestPrices } = await import("../shared/schema");
+              const { eq } = await import("drizzle-orm");
+              const { db } = await import("./db");
               
-              // Definitive Institutional Price Correction & Sparkline Purge v3.0
-              if (inst.symbol === "BTCUSDT") {
-                updateData.price = "69563.25";
-                updateData.sparkline = ["69563.25"];
-              } else if (inst.symbol === "XAUUSD") {
-                updateData.price = "4791.55";
-                updateData.sparkline = ["4791.55"];
-              } else if (inst.symbol === "USDINR") {
-                updateData.price = "83.50";
-                updateData.sparkline = ["83.50"];
-              } else if (inst.symbol === "USDPKR") {
-                updateData.price = "278.40";
-                updateData.sparkline = ["278.40"];
-              }
+              // Batch update for better performance
+              const updates: Promise<any>[] = [];
+              const allInsts = await db.select().from(instruments);
+              
+              for (const inst of allInsts) {
+                const isOpen = isGlobalMarketOpen(inst.assetClass, inst.symbol);
+                let updateData: any = { isOpen, asOf: new Date() };
+                
+                // Price updates for key instruments
+                if (inst.symbol === "BTCUSDT") {
+                  updateData.price = "69563.25";
+                  updateData.sparkline = ["69563.25"];
+                } else if (inst.symbol === "XAUUSD") {
+                  updateData.price = "4791.55";
+                  updateData.sparkline = ["4791.55"];
+                } else if (inst.symbol === "USDINR") {
+                  updateData.price = "83.50";
+                  updateData.sparkline = ["83.50"];
+                } else if (inst.symbol === "USDPKR") {
+                  updateData.price = "278.40";
+                  updateData.sparkline = ["278.40"];
+                }
 
-              await db.update(latestPrices)
-                .set(updateData)
-                .where(eq(latestPrices.instrumentId, inst.id));
+                updates.push(
+                  db.update(latestPrices)
+                    .set(updateData)
+                    .where(eq(latestPrices.instrumentId, inst.id))
+                );
+              }
+              
+              await Promise.all(updates);
+              log("Institutional market status & prices synchronized.");
+            } catch (syncErr) {
+              console.error("[Sync Error]", syncErr);
             }
-            log("Institutional market status & prices synchronized.");
-          } catch (syncErr) {
-            console.error("[Sync Error]", syncErr);
-          }
+          }, 2000); // Delay to not block startup
        } catch (error) {
          console.error("[Background Init Error]", error);
        }
-    })();
+    }, 1000); // Start background tasks after 1 second
 
   } catch (error: any) {
     console.error(`[Critical Error] Startup failed:`, error);

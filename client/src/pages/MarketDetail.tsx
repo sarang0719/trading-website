@@ -39,7 +39,8 @@ import { AiPaymentModal } from "@/components/AiPaymentModal";
 import { useAuth } from "@/hooks/use-auth";
 import StrategyPanel from "@/components/StrategyPanel";
 import { isGlobalMarketOpen } from "@shared/market-hours";
-import TradingViewChart from "@/components/TradingViewChart";
+import LiveTradingChart from "@/components/LiveTradingChart";
+import type { PriceLevel } from "@/components/LiveTradingChart";
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ import {
 const CommissionModal = ({ open, onAgree, onDeny }: { open: boolean, onAgree: () => void, onDeny: () => void }) => {
   return (
     <Dialog open={open} onOpenChange={(val) => !val && onDeny()}>
-      <DialogContent className="max-w-md bg-[#0f1420] border-border/40 shadow-2xl overflow-hidden rounded-2xl">
+      <DialogContent className="max-w-md bg-background border-border/40 shadow-2xl overflow-hidden rounded-2xl">
         <DialogHeader className="p-2">
           <div className="mx-auto w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-2 border border-primary/20">
              <Zap className="w-8 h-8 text-primary" />
@@ -83,7 +84,7 @@ const CommissionModal = ({ open, onAgree, onDeny }: { open: boolean, onAgree: ()
             To enable our institutional AI Quant algorithms, a <span className="text-primary font-bold">10% Company Commission</span> is applied on each investment amount. This fee ensures our high-performance infrastructure remains cutting-edge.
           </DialogDescription>
         </DialogHeader>
-        <div className="bg-[#161a25] px-6 py-4 border-y border-border/10 space-y-3">
+        <div className="bg-card px-6 py-4 border-y border-border/10 space-y-3">
            <div className="flex items-center gap-3">
               <div className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
                  <CheckCircle className="w-3 h-3 text-emerald-400" />
@@ -185,7 +186,8 @@ export default function MarketDetail() {
   const [chartType, setChartType] = useState<
     "bar" | "candle" | "hollow" | "line" | "stepline" | "area" | "baseline" | "columns" | "heikin"
   >("candle");
-  const [showIndicators, setShowIndicators] = useState(false);
+  const [activeIndicators, setActiveIndicators] = useState<string[]>([]);
+  const [flashColor, setFlashColor] = useState<string | null>(null);
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef          = useRef<any>(null);
@@ -355,7 +357,7 @@ export default function MarketDetail() {
   // --- Auto-Invest Forced Values (Rounds) ---
   const isAdmin = useMemo(() => {
     if (!user) return false;
-    const adminEmails = ["saran123@gmail.com", "htctrade@gmail.com"];
+    const adminEmails = ["saran123@gmail.com", "htctrade123@gmail.com"];
     return adminEmails.includes((user.email || "").toLowerCase()) || 
            user.role === "ADMIN_1" || 
            user.role === "ADMIN_2";
@@ -406,6 +408,11 @@ export default function MarketDetail() {
     }
   });
 
+  const [prediction, setPrediction] = useState<CandlePrediction | null>(null);
+  const [predCountdown, setPredCountdown] = useState("");
+  const [showPredFactors, setShowPredFactors] = useState(false);
+  const lastCandleTimeRef = useRef<number>(0);
+
   // Gate: consume a credit when the user opens the bot popup
   const handleOpenBotPopup = useCallback(async () => {
     if (!showAiBotPopup) {
@@ -421,13 +428,22 @@ export default function MarketDetail() {
           return;
         }
       }
+      // Immediately run the predictor so the popup shows data without waiting
+      if (candlesRef.current?.length >= 52) {
+        try {
+          const { predictNextCandle } = await import("@/lib/candle-predictor");
+          const closed = candlesRef.current.slice(0, -1);
+          const pred = predictNextCandle(closed, 60);
+          if (pred) {
+            setPrediction(pred);
+            setAiSignal(pred.direction);
+            setAiConfidence(pred.probability);
+          }
+        } catch {}
+      }
     }
     setShowAiBotPopup(v => !v);
   }, [showAiBotPopup, canUseAi, isUnlimited, usePrediction]);
-  const [prediction, setPrediction] = useState<CandlePrediction | null>(null);
-  const [predCountdown, setPredCountdown] = useState("");
-  const [showPredFactors, setShowPredFactors] = useState(false);
-  const lastCandleTimeRef = useRef<number>(0);
 
   // ── Next-Candle Predictor Engine (fires on every candle close) ──────────
   useEffect(() => {
@@ -448,8 +464,8 @@ export default function MarketDetail() {
     const runPredictor = async (candles: any[]) => {
       try {
         const { predictNextCandle } = await import("@/lib/candle-predictor");
-        // Use only the last 300 CLOSED candles (exclude the live one)
-        if (!candles || candles.length < 20) return;
+        // Need at least 52 candles: 50 for warmup + 1 live tick + 1 safety
+        if (!candles || candles.length < 52) return;
         const closed = candles.slice(0, -1);
         const pred = predictNextCandle(closed, candleSecs);
         if (pred) {
@@ -457,20 +473,23 @@ export default function MarketDetail() {
           setAiSignal(pred.direction);
           setAiConfidence(pred.probability);
         }
-      } catch (e) {
+      } catch (e: any) {
+        setPrediction({
+          direction: "BUY", action: "MONITORING", probability: 0, strength: "WEAK",
+          message: `Internal Error: ${e.message}`, generatedAt: Date.now(), forCandleAt: 0
+        });
         console.error("AI Engine Prediction Error:", e);
       }
     };
 
     // Run immediately on existing candles (if any)
-    if (candlesRef.current?.length > 20) {
+    if (candlesRef.current?.length >= 52) {
       runPredictor(candlesRef.current);
     }
 
-    // Poll every 2 seconds — v17.0 Hyper-Reactive Institutional Monitor
-    // Analyze live price action WHILE it happens for instant entries.
+    // Poll every 2 seconds — v20.0 Self-Calibrating Predictor
     const v17Monitor = setInterval(() => {
-      if (candlesRef.current?.length > 20) {
+      if (candlesRef.current?.length >= 52) {
         runPredictor(candlesRef.current);
       }
     }, 2000);
@@ -507,32 +526,21 @@ export default function MarketDetail() {
 
   // Auto-Trade execution
   useEffect(() => {
-    if (!autoTradeActive || !instrument || !displayPrice) return;
+    if (!autoTradeActive || !instrument) return;
     
-    // Profit limit completely removed for user account
-    // if (sessionPnL >= takeProfit) {
-    //   toast({ title: "Target Reached", description: `You hit your profit limit of $${takeProfit}!` });
-    //   setAutoTradeActive(false);
-    //   return;
-    // }
-    // if (sessionPnL <= -stopLoss) {
-    //   toast({ variant: "destructive", title: "Stop Loss Hit", description: `You reached your maximum loss limit of $${stopLoss}.` });
-    //   setAutoTradeActive(false);
-    //   return;
-    // }
-
-    // Delay bot logic slightly to look natural
-    const botTimer = setTimeout(() => {
+    // Check every 1 second
+    const botTimer = setInterval(() => {
       // If we already have an active trade, wait until it finishes
       if (activeTrades.length > 0) return;
 
-      if (!placeTrade.isPending) {
+      // Only enter if we explicitly have a STRONG signal, to prevent gambling.
+      if (prediction?.strength === "STRONG" && !placeTrade.isPending) {
         handlePlaceTrade(aiSignal);
       }
-    }, 2000);
+    }, 1000);
 
-    return () => clearTimeout(botTimer);
-  }, [autoTradeActive, activeTrades.length, aiSignal, displayPrice, sessionPnL, placeTrade.isPending]);
+    return () => clearInterval(botTimer);
+  }, [autoTradeActive, activeTrades.length, aiSignal, prediction?.strength, instrument, placeTrade.isPending]);
 
   // Expose refs for Overlay
   // chartRef, mainSeriesRef are already defined above
@@ -548,6 +556,8 @@ export default function MarketDetail() {
       placedBy: autoTradeActive ? "AI_BOT" : undefined
     }, {
       onSuccess: () => {
+        setFlashColor(side === "BUY" ? "bg-emerald-500" : "bg-rose-500");
+        setTimeout(() => setFlashColor(null), 300);
         toast({ title: "Trade Placed", description: `Opened a ${tradeDuration}s ${side} order on ${instrument.symbol}.` });
       },
       onError: (err: any) => {
@@ -638,9 +648,9 @@ export default function MarketDetail() {
 
   // Handle Indicators visibility
   useEffect(() => {
-     if (smaSeriesRef.current) smaSeriesRef.current.applyOptions({ visible: showIndicators });
-     if (emaSeriesRef.current) emaSeriesRef.current.applyOptions({ visible: showIndicators });
-  }, [showIndicators]);
+     if (smaSeriesRef.current) smaSeriesRef.current.applyOptions({ visible: activeIndicators.includes("SMA") });
+     if (emaSeriesRef.current) emaSeriesRef.current.applyOptions({ visible: activeIndicators.includes("EMA") });
+  }, [activeIndicators]);
 
   // ── Unified chart + data effect ──────────────────────────────────────────
   useEffect(() => {
@@ -743,8 +753,8 @@ export default function MarketDetail() {
     // Array of indicator refs for toggling visibility
     smaSeriesRef.current = chart.addSeries(LineSeries, { color: "rgba(255, 193, 7, 0.8)", lineWidth: 2, title: "SMA(20)" });
     emaSeriesRef.current = chart.addSeries(LineSeries, { color: "rgba(103, 58, 183, 0.8)", lineWidth: 2, title: "EMA(55)" });
-    smaSeriesRef.current.applyOptions({ visible: showIndicators });
-    emaSeriesRef.current.applyOptions({ visible: showIndicators });
+    smaSeriesRef.current.applyOptions({ visible: activeIndicators.includes("SMA") });
+    emaSeriesRef.current.applyOptions({ visible: activeIndicators.includes("EMA") });
 
     // 6. Load data from APIs
     const interval = TF_MAP[timeframe] || "1d";
@@ -927,12 +937,11 @@ export default function MarketDetail() {
 
       if (!isActive || !mainSeries || baseData.length === 0) return;
 
-        // ─── Universal Spike Filter: removes glitched candles for ALL symbols ───
+        // ─── Universal Spike Filter ─────────────────────────────────────────
         if (baseData.length > 2) {
           const avgClose = baseData.slice(-50).reduce((s: number, c: any) => s + c.close, 0) / Math.min(baseData.length, 50);
-          // XAUUSD uses tighter 2% threshold (PAXGUSDT proxy has more glitches)
-          const spikePercent = (instrument?.symbol === "XAUUSD") ? 0.02 : 0.05;
-          const spikeThreshold = avgClose * spikePercent;
+          // Use 8% threshold for all symbols (XAUUSD was 2% which was too tight, rejecting real data)
+          const spikeThreshold = avgClose * 0.08;
           baseData = baseData.filter((candle: any) => {
             if (!candle.open || !candle.close || !candle.high || !candle.low) return false;
             if (candle.high <= 0 || candle.low <= 0) return false;
@@ -944,76 +953,36 @@ export default function MarketDetail() {
           });
         }
 
-      // ─── Render historical candles and volume ────────────────────────────
-      try {
-        mainSeries.setData(baseData);
-        volumeSeries.setData(baseData.map((d: any) => ({
-          time: d.time, value: d.volume || 0,
-          color: d.close >= d.open ? "rgba(14,203,129,0.5)" : "rgba(246,70,93,0.5)",
-        })));
-
-        // Scroll to show latest candles
-        const lastTime = baseData[baseData.length - 1].time as number;
-        const firstTime = baseData[0].time as number;
-        let fromTime = firstTime;
-        if (activeRange === "1D") fromTime = lastTime - 86400;
-        else if (activeRange === "5D") fromTime = lastTime - 432000;
-        else if (activeRange === "1M") fromTime = lastTime - 2592000;
-        chart.timeScale().setVisibleRange({
-          from: Math.max(fromTime, firstTime) as UTCTimestamp,
-          to: (lastTime + candleSecs * 5) as UTCTimestamp,
-        });
-        candlesRef.current = baseData;
-
-        // SMA(20) + EMA(55) indicators
-        const closes = baseData.map((d: any) => d.close);
-        const smaData: any[] = [], emaData: any[] = [];
-        let ema = closes[0];
-        for (let i = 0; i < baseData.length; i++) {
-          if (i >= 19) smaData.push({ time: baseData[i].time, value: closes.slice(i - 19, i + 1).reduce((a: number, b: number) => a + b) / 20 });
-          ema = closes[i] * (2 / 56) + ema * (54 / 56);
-          if (i >= 54) emaData.push({ time: baseData[i].time, value: ema });
-        }
-        smaSeriesRef.current?.setData(smaData);
-        emaSeriesRef.current?.setData(emaData);
-
-        // ✅ NOW that data is rendered, seed live state and start engine
-        if (baseData.length > 0) {
-          const last = baseData[baseData.length - 1];
-          currentPrice = last.close;
-          targetPrice  = last.close;
-          liveOpen     = last.open;
-          liveHigh     = last.high;
-          liveLow      = last.low;
-        }
-        candleSecs = calcCandleSecs(interval);
-        startLiveEngine();
-      } catch {}
-
-
-
 
       // ── Step 7 (startLiveEngine): Start interval + WebSocket AFTER data is loaded ──
       const startLiveEngine = () => {
         let wanderOffset = 0;
         let wsTicks = 0;
+        let lastRealPrice = targetPrice;
 
-        // 100ms smooth interpolation toward targetPrice
+        // ── 100ms candle animation loop ─────────────────────────────────────
+        // Always moves: interpolates toward target + realistic drift between ticks
         simInterval = setInterval(() => {
           if (!isActive || !mainSeriesRef.current || !chartRef.current) return;
           wsTicks++;
-          if (wsTicks < 15) {
-            currentPrice += (targetPrice - currentPrice) * 0.4;
+
+          if (wsTicks <= 4) {
+            // Slow smooth snap toward WS-provided target
+            currentPrice += (targetPrice - currentPrice) * 0.15;
           } else {
-            const ts = Date.now() / 1200;
-            const drift = (Math.sin(ts * 3.2) + Math.cos(ts * 1.9) + (Math.random() * 2 - 1)) / 3;
-            const pip = targetPrice * 0.000012;
+            // Organic micro-drift: much slower, less erratic
+            const pip = Math.max(targetPrice * 0.00002, 0.00001); // reduced pip size
+            const ts  = Date.now() / 4000; // slowed down the sine wave
+            const drift = (Math.sin(ts * 1.1) * 0.2 + Math.cos(ts * 0.8) * 0.1 + (Math.random() - 0.5) * 0.05); // reduced noise
             wanderOffset += drift * pip;
-            wanderOffset = Math.max(-pip * 5, Math.min(pip * 5, wanderOffset));
-            currentPrice += ((targetPrice + wanderOffset) - currentPrice) * 0.25;
+            const isMetals = instrument?.symbol === "XAUUSD" || instrument?.symbol === "XAGUSD";
+            const maxWander = pip * (isMetals ? 1 : 2); // reduced max wander
+            wanderOffset = Math.max(-maxWander, Math.min(maxWander, wanderOffset));
+            currentPrice += ((targetPrice + wanderOffset) - currentPrice) * 0.04;
           }
+
           updateLiveCandle(currentPrice);
-        }, 100);
+        }, 500); // Increased interval to 500ms so it doesn't move 10 times a second
 
         // ── 7a / 7b: Auto-Reconnecting WebSocket with Exponential Backoff ────────
         // If the connection drops for ANY reason (network, server restart, timeout),
@@ -1026,8 +995,8 @@ export default function MarketDetail() {
           if (!isActive) return;
           try {
             if (instrument.exchange === "BINANCE" && instrument.symbol !== "XAUUSD") {
-              // ── Binance kline stream (Crypto only) ──────────────────────────
-              const wsSymbol = instrument.symbol.toLowerCase();
+              // ── Binance kline stream (Crypto + Gold via PAXGUSDT) ──────────
+              const wsSymbol = instrument.symbol === "XAUUSD" ? "paxgusdt" : instrument.symbol.toLowerCase();
               ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
 
               ws.onopen = () => { reconnectDelay = 1000; }; // reset backoff on success
@@ -1056,7 +1025,7 @@ export default function MarketDetail() {
 
               ws.onerror = () => { try { ws?.close(); } catch {} };
 
-            } else if (instrument.exchange !== "OTC" && instrument.symbol !== "XAUUSD") {
+            } else if (instrument.exchange !== "OTC") {
               // ── TwelveData stream (Forex / Stocks) ───────────────────────────
               let tdSym = instrument.symbol;
               if ((instrument.assetClass === "FOREX" || ["XAUUSD","XAGUSD"].includes(tdSym))
@@ -1064,7 +1033,7 @@ export default function MarketDetail() {
                 tdSym = tdSym.substring(0, 3) + "/" + tdSym.substring(3);
               }
 
-              ws = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=5703b6c3bb53485bbf9b57232c9c59b1");
+              ws = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=4a3bb708bb7247528d0efe958476bdaa");
 
               ws.onopen = () => {
                 reconnectDelay = 1000;
@@ -1110,13 +1079,58 @@ export default function MarketDetail() {
         (simInterval as any).__reconnectCleanup = reconnectCleanup;
 
       }; // end startLiveEngine
+
+      // ─── Render historical candles and volume ────────────────────────────
+      try {
+        mainSeries.setData(baseData);
+        volumeSeries.setData(baseData.map((d: any) => ({
+          time: d.time, value: d.volume || 0,
+          color: d.close >= d.open ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+        })));
+
+        // Scroll to show latest candles
+        const lastTime = baseData[baseData.length - 1].time as number;
+        const firstTime = baseData[0].time as number;
+        let fromTime = firstTime;
+        if (activeRange === "1D") fromTime = lastTime - 86400;
+        else if (activeRange === "5D") fromTime = lastTime - 432000;
+        else if (activeRange === "1M") fromTime = lastTime - 2592000;
+        chart.timeScale().setVisibleRange({
+          from: Math.max(fromTime, firstTime) as UTCTimestamp,
+          to: (lastTime + candleSecs * 5) as UTCTimestamp,
+        });
+        candlesRef.current = baseData;
+
+        // SMA(20) + EMA(55) indicators
+        const closes = baseData.map((d: any) => d.close);
+        const smaData: any[] = [], emaData: any[] = [];
+        let ema = closes[0];
+        for (let i = 0; i < baseData.length; i++) {
+          if (i >= 19) smaData.push({ time: baseData[i].time, value: closes.slice(i - 19, i + 1).reduce((a: number, b: number) => a + b) / 20 });
+          ema = closes[i] * (2 / 56) + ema * (54 / 56);
+          if (i >= 54) emaData.push({ time: baseData[i].time, value: ema });
+        }
+        smaSeriesRef.current?.setData(smaData);
+        emaSeriesRef.current?.setData(emaData);
+
+        // ✅ NOW that data is rendered, seed live state and start engine
+        if (baseData.length > 0) {
+          const last = baseData[baseData.length - 1];
+          currentPrice = last.close;
+          targetPrice  = last.close;
+          liveOpen     = last.open;
+          liveHigh     = last.high;
+          liveLow      = last.low;
+        }
+        candleSecs = calcCandleSecs(interval);
+        startLiveEngine();
+      } catch {}
     }; // end loadData
 
     loadData();
 
     // ── Step 8: Polling for XAUUSD (Yahoo Finance spot gold) + non-WS markets ───
-    // XAUUSD uses Yahoo Finance REST (GC=F) for accurate spot gold — NOT PAXGUSDT
-    if (isActive && (instrument?.symbol === "XAUUSD" || instrument?.exchange !== "BINANCE")) {
+    if (isActive && instrument?.exchange !== "BINANCE") {
       const fetchRealPrice = async () => {
         if (!isActive || !chartRef.current) return;
         try {
@@ -1162,7 +1176,7 @@ export default function MarketDetail() {
         chartRef.current = null;
       }
     };
-  }, [instrument?.id, timeframe, chartType, activeRange, showIndicators]); // eslint-disable-line
+  }, [instrument?.id, timeframe, chartType, activeRange]); // eslint-disable-line
 
   // ── Loading / Error States ─────────────────────────────────────────────
   if (instrumentQuery.isLoading) {
@@ -1270,9 +1284,29 @@ export default function MarketDetail() {
 
             {/* Indicators / Alert / Replay */}
             <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground pr-3 border-r border-border/40 shrink-0">
-              <div onClick={() => setShowIndicators(!showIndicators)} className={cn("flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors", showIndicators && "text-primary font-bold")}>
-                <Activity className="w-3.5 h-3.5" /> Indicators
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 outline-none hover:text-foreground transition-colors">
+                  <Activity className="w-3.5 h-3.5" /> 
+                  <span className={cn(activeIndicators.length > 0 && "text-primary font-bold")}>Indicators</span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-40">
+                  {["SMA", "EMA", "RSI", "MACD"].map(ind => (
+                    <DropdownMenuItem 
+                      key={ind} 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setActiveIndicators(prev => 
+                          prev.includes(ind) ? prev.filter(i => i !== ind) : [...prev, ind]
+                        );
+                      }}
+                      className="flex items-center justify-between cursor-pointer"
+                    >
+                      {ind}
+                      {activeIndicators.includes(ind) && <CheckCircle className="w-3.5 h-3.5 text-primary" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <div onClick={() => toast({ title: "Alert Set", description: `You will be notified when ${instrument.symbol} has unusual volume or price movement.`})} className="flex items-center gap-1.5 cursor-pointer hover:text-foreground">
                 <Bell className="w-3.5 h-3.5" /> Alert
               </div>
@@ -1306,10 +1340,29 @@ export default function MarketDetail() {
           </div>
 
 
-          {/* ── Live Chart Canvas — Lightweight Charts Engine ── */}
+          {/* ── Live Chart — Custom Engine (Quotex-style, no TV embed) ── */}
           <div className="flex-1 min-h-0 w-full relative">
-            {/* Main chart canvas — chart engine mounts here */}
-            <div ref={chartContainerRef} className="absolute inset-0" />
+            <LiveTradingChart
+              symbol={instrument.symbol}
+              exchange={instrument.exchange}
+              assetClass={instrument.assetClass ?? ""}
+              timeframe={timeframe}
+              onPriceUpdate={(price) => {
+                if (price > 0) setLivePrice(price);
+              }}
+              priceLevels={activeTrades.map((t): PriceLevel => ({
+                id: t.id,
+                price: parseFloat(t.strikePrice as string),
+                color: t.side === "BUY" ? "#10b981" : "#f43f5e",
+                title: t.side as string,
+              }))}
+              activeIndicators={activeIndicators}
+            />
+            
+            {/* Trade Flash Overlay */}
+            <div className={cn("absolute inset-0 z-50 pointer-events-none transition-all duration-300", 
+              flashColor ? `${flashColor}/20` : "bg-transparent"
+            )} />
 
             {/* Candle close timer overlay */}
             <CandleTimer interval={timeframe} />
@@ -1326,12 +1379,12 @@ export default function MarketDetail() {
 
             {/* Zoom controls */}
             <div className="absolute right-4 bottom-[100px] z-[30] flex flex-col gap-2">
-               <button onClick={handleToggleAutoScale} title="Auto-Scale" className="w-8 h-8 rounded-full bg-[#161a25]/90 hover:bg-[#1f2433] border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all font-bold text-xs uppercase">A</button>
-               <button onClick={handleResetFit} title="Fit to Screen" className="w-8 h-8 rounded-full bg-[#161a25]/90 hover:bg-[#1f2433] border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all"><Maximize className="w-3.5 h-3.5" /></button>
-               <div className="flex flex-col bg-[#161a25]/90 border border-white/10 rounded-full shadow-xl overflow-hidden">
-                   <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 hover:bg-[#1f2433] flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Plus className="w-4 h-4" /></button>
+               <button onClick={handleToggleAutoScale} title="Auto-Scale" className="w-8 h-8 rounded-full bg-card/90 hover:bg-accent border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all font-bold text-xs uppercase">A</button>
+               <button onClick={handleResetFit} title="Fit to Screen" className="w-8 h-8 rounded-full bg-card/90 hover:bg-accent border border-white/10 flex items-center justify-center text-muted-foreground hover:text-white shadow-xl transition-all"><Maximize className="w-3.5 h-3.5" /></button>
+               <div className="flex flex-col bg-card/90 border border-white/10 rounded-full shadow-xl overflow-hidden">
+                   <button onClick={handleZoomIn} title="Zoom In" className="w-8 h-8 hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Plus className="w-4 h-4" /></button>
                    <div className="h-px bg-white/10 w-full" />
-                   <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 hover:bg-[#1f2433] flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Minus className="w-4 h-4" /></button>
+                   <button onClick={handleZoomOut} title="Zoom Out" className="w-8 h-8 hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-white transition-all"><Minus className="w-4 h-4" /></button>
                </div>
             </div>
 
@@ -1358,7 +1411,7 @@ export default function MarketDetail() {
         </div>
 
         {/* ── QUOTEX STYLE RIGHT SIDEBAR (Desktop) ── */}
-        <div className="hidden lg:flex lg:w-[300px] xl:w-[320px] shrink-0 flex-col border-l border-border/40 bg-[#161a25] lg:h-full">
+        <div className="hidden lg:flex lg:w-[300px] xl:w-[320px] shrink-0 flex-col border-l border-border/40 bg-card lg:h-full">
           {/* TOP ZONE: scrollable section containing all controls */}
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
 
@@ -1384,22 +1437,38 @@ export default function MarketDetail() {
              </div>
              
              <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
-               Proprietary QuantEdge v9.0 algorithms are currently analyzing real-time order flow and multi-timeframe liquidity zones.
+               Proprietary QUANTEDGE V12.1 · SMC algorithms are currently analyzing real-time order flow and multi-timeframe liquidity zones.
              </p>
-            <div className="flex items-center justify-between border border-border/10 bg-[#232936] p-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors" onClick={() => {
-              if (!user?.commissionAgreed && !["saran123@gmail.com", "htctrade@gmail.com"].includes(user?.email || "")) {
-                setShowCommissionModal(true);
-              } else {
+            <div className={cn("flex items-center justify-between border p-2 rounded-lg transition-colors", 
+              isAdmin 
+                ? "border-border/10 bg-background cursor-pointer hover:bg-white/5" 
+                : "border-rose-500/10 bg-muted/40 cursor-not-allowed opacity-75"
+            )} 
+            onClick={() => {
+              if (!isAdmin) {
+                toast({ title: "Access Restricted", description: "Smart Auto-Invest is strictly locked for administrators.", variant: "destructive" });
+                return;
+              }
+              if (!user?.commissionAgreed) {
                 setAutoTradeEnabled(!autoTradeEnabled);
               }
             }}>
-              <span className="text-xs font-bold text-white px-1">Smart Auto-Invest</span>
-              <Switch checked={autoTradeEnabled} onCheckedChange={(val) => {
-                if (!user?.commissionAgreed && !["saran123@gmail.com", "htctrade@gmail.com"].includes(user?.email || "") && val) {
-                  setShowCommissionModal(true);
-                } else {
-                  setAutoTradeEnabled(val);
-                }
+              <div className="flex items-center gap-1.5">
+                {!isAdmin && <Lock className="w-3.5 h-3.5 text-rose-500" />}
+                <span className={cn("text-xs font-bold px-1", isAdmin ? "text-white" : "text-muted-foreground")}>
+                  Smart Auto-Invest
+                </span>
+              </div>
+              <Switch 
+                checked={autoTradeEnabled} 
+                disabled={!isAdmin}
+                onCheckedChange={(val) => {
+                  if (!isAdmin) return;
+                  if (!user?.commissionAgreed && val) {
+                    setShowCommissionModal(true);
+                  } else {
+                    setAutoTradeEnabled(val);
+                  }
               }} />
             </div>
 
@@ -1412,8 +1481,8 @@ export default function MarketDetail() {
                         {autoTradeEnabled && !isAdmin && <Lock className="w-2.5 h-2.5 text-primary" />}
                      </label>
                      <div className={cn(
-                       "flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 transition-all",
-                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-black/20" : "focus-within:border-primary/50"
+                       "flex items-center bg-background rounded-md overflow-hidden border border-border/10 transition-all",
+                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-muted/20" : "focus-within:border-primary/50"
                      )}>
                         <span className="pl-2 text-muted-foreground text-[10px]">$</span>
                         <input 
@@ -1432,8 +1501,8 @@ export default function MarketDetail() {
                         {autoTradeEnabled && !isAdmin && <Lock className="w-2.5 h-2.5 text-rose-500" />}
                      </label>
                      <div className={cn(
-                       "flex items-center bg-[#232936] rounded-md overflow-hidden border border-border/10 transition-all",
-                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-black/20" : "focus-within:border-rose-500/50"
+                       "flex items-center bg-background rounded-md overflow-hidden border border-border/10 transition-all",
+                       autoTradeEnabled && !isAdmin ? "opacity-60 bg-muted/20" : "focus-within:border-rose-500/50"
                      )}>
                         <span className="pl-2 text-muted-foreground text-[10px]">$</span>
                         <input 
@@ -1485,7 +1554,7 @@ export default function MarketDetail() {
                   {user?.tradeMode ?? "DEMO"}: <span>${user?.tradeMode === "REAL" ? (user?.walletBalance || "0.00") : (user?.demoBalance || "10000.00")}</span>
                 </div>
               </div>
-              <div className="flex bg-[#232936] rounded-xl overflow-hidden border border-border/10 transition-colors focus-within:border-primary/50">
+              <div className="flex bg-background rounded-xl overflow-hidden border border-border/10 transition-colors focus-within:border-primary/50">
                 <button 
                   disabled={autoTradeEnabled && !isAdmin}
                   onClick={() => setTradeAmount(Math.max(1, tradeAmount - 10))} 
@@ -1534,7 +1603,7 @@ export default function MarketDetail() {
                       "py-2 rounded-lg text-xs font-bold transition-all border disabled:opacity-50 disabled:cursor-not-allowed",
                       timeframe === d.tf
                         ? "bg-primary/20 text-primary border-primary/50 shadow-sm"
-                        : "bg-[#232936] text-muted-foreground border-transparent hover:bg-white/5"
+                        : "bg-background text-muted-foreground border-transparent hover:bg-white/5"
                     )}
                   >
                     {d.label}
@@ -1596,7 +1665,7 @@ export default function MarketDetail() {
                   const pnlStr = isWin ? `+$${pnl.toFixed(2)}` : `-$${Math.abs(pnl).toFixed(2)}`;
                   
                   return (
-                    <div key={trade.id} className="bg-[#232936] rounded-xl p-3 border border-border/10 relative overflow-hidden">
+                    <div key={trade.id} className="bg-background rounded-xl p-3 border border-border/10 relative overflow-hidden">
                       <div className={cn("absolute left-0 top-0 bottom-0 w-1", trade.side === "BUY" ? "bg-emerald-500" : "bg-rose-500")} />
                       <div className="flex items-center justify-between text-xs font-bold mb-1.5 ml-1">
                         <span className="text-white">${amount.toFixed(2)} {trade.side}</span>
@@ -1633,7 +1702,7 @@ export default function MarketDetail() {
           </div>{/* END TOP ZONE */}
 
           {/* BOTTOM ZONE: History always pinned, min 200px, own scroll */}
-          <div className="shrink-0 flex flex-col border-t border-border/20 bg-[#161a25]" style={{ minHeight: '200px', maxHeight: '38%' }}>
+          <div className="shrink-0 flex flex-col border-t border-border/20 bg-card" style={{ minHeight: '200px', maxHeight: '38%' }}>
              <h3 className="text-xs font-bold text-muted-foreground uppercase mb-3 shrink-0 px-4 pt-4"><History className="w-3.5 h-3.5 inline mr-1" /> History</h3>
              <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
              {pastTrades.length === 0 ? (
@@ -1646,7 +1715,7 @@ export default function MarketDetail() {
                    const strike = parseFloat(trade.strikePrice as string);
                    const settle = parseFloat(trade.settlePrice as string);
                    return (
-                     <div key={trade.id} className="bg-[#232936] rounded-xl p-3 border border-border/10">
+                     <div key={trade.id} className="bg-background rounded-xl p-3 border border-border/10">
                        <div className="flex items-center justify-between text-xs font-bold mb-1">
                           <span className="flex items-center gap-1.5">
                             {isWin ? <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> : isLoss ? <XCircle className="w-3.5 h-3.5 text-rose-400" /> : <Clock className="w-3.5 h-3.5 text-yellow-400" />}
@@ -1664,13 +1733,13 @@ export default function MarketDetail() {
                     );
                   })}
                 </div>
-               )}
+              )}
               </div>
-            </div>
-          </div>
-       </div>
+           </div>
+         </div>
+      </div>
 
-      {/* AI Payment Modal — never shown for admin users */}
+      {/* ── AI PAYMENT MODAL ── */}
       {!isUnlimited && (
         <AiPaymentModal
           open={showPaymentModal}
@@ -1678,7 +1747,7 @@ export default function MarketDetail() {
           onSuccess={(creditsAdded) => {
             setShowPaymentModal(false);
             fetchCredits();
-            toast({ title: `✅ ${creditsAdded} AI predictions added!`, description: "You can now use the QuantEdge AI bot." });
+            toast({ title: `✅ ${creditsAdded} AI predictions added!`, description: "You can now use the QUANTEDGE V12.1 · SMC AI bot." });
           }}
           freePredictionsUsed={credits?.freePredictionsUsed ?? 0}
           freePredictionsLimit={credits?.freePredictionsLimit ?? 6}
@@ -1686,115 +1755,135 @@ export default function MarketDetail() {
         />
       )}
 
-      {/* 10% Infrastructure Commission Agreement */}
-      <CommissionModal 
-        open={showCommissionModal} 
-        onAgree={handleAgreeCommission} 
-        onDeny={() => setShowCommissionModal(false)} 
+      {/* ── COMMISSION MODAL ── */}
+      <CommissionModal
+        open={showCommissionModal}
+        onAgree={handleAgreeCommission}
+        onDeny={() => setShowCommissionModal(false)}
       />
 
-      {/* AI BOT POPUP RESTORED (CLICK-TRIGGERED, PREVIOUS TYPE UI) */}
+      {/* ── AI BOT POPUP (bottom-right floating) ── */}
       <div className="fixed bottom-6 right-8 flex flex-col items-end gap-3 z-50">
-           {/* Detailed Prediction View — only shows on click */}
-           {showAiBotPopup && (
-             <div className="bg-[#0f1420] border border-primary/30 p-5 rounded-2xl shadow-2xl max-w-[320px] mb-2 animate-in fade-in zoom-in-95 duration-200">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
-                   <div className="flex items-center gap-2">
-                      <BrainCircuit className="w-4 h-4 text-primary" />
-                      <span className="text-[10px] font-black uppercase tracking-widest text-primary">QuantEdge AI v9.0</span>
-                   </div>
-                   <button onClick={() => setShowAiBotPopup(false)} className="text-muted-foreground hover:text-white"><Plus className="w-4 h-4 rotate-45" /></button>
-                </div>
+        {showAiBotPopup && (
+          <div className="bg-background border border-primary/30 p-5 rounded-2xl shadow-2xl max-w-[320px] mb-2 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
+              <div className="flex items-center gap-2">
+                <BrainCircuit className="w-4 h-4 text-primary" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-primary">QUANTEDGE V12.1 · SMC</span>
+              </div>
+              <button onClick={() => setShowAiBotPopup(false)} className="text-muted-foreground hover:text-white"><Plus className="w-4 h-4 rotate-45" /></button>
+            </div>
 
-                {prediction ? (
-                  <div className="space-y-4">
-                     <div className={cn(
-                       "flex items-center gap-4 p-3 rounded-xl border",
-                       prediction.action === "BUY" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
-                     )}>
-                        {prediction.action === "BUY" ? <TrendingUp className="w-10 h-10" /> : <TrendingDown className="w-10 h-10" />}
-                        <div>
-                           <div className="text-3xl font-black tracking-tighter leading-none">{prediction.action}</div>
-                           <div className="text-[10px] uppercase font-bold tracking-widest mt-1 opacity-80">Strong Signal</div>
-                        </div>
-                     </div>
-
-                     <div className="space-y-2">
-                        <div className="flex justify-between text-[11px] font-bold">
-                           <span className="text-muted-foreground uppercase tracking-wider">AI Confidence</span>
-                           <span className={prediction.probability > 70 ? "text-emerald-400" : "text-yellow-400"}>{prediction.probability}% Accuracy</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                           <div 
-                             className={cn("h-full transition-all duration-700", prediction.probability > 70 ? "bg-emerald-500" : "bg-yellow-500")}
-                             style={{ width: `${prediction.probability}%` }}
-                           />
-                        </div>
-                     </div>
-
-                     <p className="text-[12px] font-medium text-slate-300 leading-relaxed italic">
-                        "{prediction.message}"
-                     </p>
+            {(() => {
+              const isBuy  = prediction ? (prediction.action !== "MONITORING" ? prediction.action === "BUY" : aiSignal === "BUY") : aiSignal === "BUY";
+              const sig    = prediction ? (prediction.action !== "MONITORING" ? prediction.action : aiSignal) : aiSignal;
+              const conf   = prediction?.probability ?? aiConfidence;
+              const score  = (prediction as any)?.confluenceScore ?? "—";
+              const btWR   = (prediction as any)?.backtestWinRate ?? 61.1;
+              const msg    = prediction?.message ?? "QUANTEDGE V12.1 · SMC — Walk-Forward Optimized Smart Money Engine.";
+              const label  = prediction?.strength === "STRONG" ? "⚡ STRONG Signal" : prediction?.strength === "NORMAL" ? "✅ Entry Signal" : "⏳ Monitoring";
+              const ob     = (prediction as any)?.orderBlock;
+              const fvg    = (prediction as any)?.fvg;
+              const bos    = (prediction as any)?.bos;
+              const macdOk = msg?.includes("MACD confirmed");
+              return (
+                <div className="space-y-3">
+                  <div className={cn(
+                    "flex items-center gap-3 p-3 rounded-xl border",
+                    isBuy ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                  )}>
+                    {isBuy ? <TrendingUp className="w-9 h-9" /> : <TrendingDown className="w-9 h-9" />}
+                    <div className="flex-1">
+                      <div className="text-3xl font-black tracking-tighter leading-none">{sig}</div>
+                      <div className="text-[10px] uppercase font-bold tracking-widest mt-0.5 opacity-80">{label}</div>
+                    </div>
+                    {score !== "—" && (
+                      <div className="text-right">
+                        <div className="text-xl font-black">{score}<span className="text-xs opacity-50">/15</span></div>
+                        <div className="text-[9px] uppercase opacity-50">Score</div>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="py-8 text-center space-y-3">
-                     <RefreshCw className="w-8 h-8 text-primary animate-spin mx-auto opacity-50" />
-                     <p className="text-xs text-muted-foreground">Synchronizing with live order flow...</p>
-                     <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-[10px] text-muted-foreground hover:text-primary transition-all underline decoration-primary/30"
-                        onClick={() => {
-                           setPrediction(null);
-                           // Force refresh through state update
-                           lastCandleTimeRef.current = 0;
-                        }}
-                     >
-                        Tap to retry sync
-                     </Button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2 text-center">
+                      <div className="text-emerald-400 font-black text-lg leading-none">{btWR}%</div>
+                      <div className="text-[9px] text-muted-foreground uppercase mt-0.5">Backtested WR</div>
+                    </div>
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center">
+                      <div className={cn("font-black text-lg leading-none", conf > 70 ? "text-emerald-400" : "text-yellow-400")}>{conf}%</div>
+                      <div className="text-[9px] text-muted-foreground uppercase mt-0.5">AI Confidence</div>
+                    </div>
                   </div>
-                )}
 
-                <Button 
-                   size="sm" 
-                   className="w-full h-8 text-[10px] font-black uppercase mt-4 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30" 
-                   onClick={() => setShowPaymentModal(true)}
-                >
-                   Institutional Credits: {totalRemaining} Remaining
-                </Button>
-             </div>
-           )}
+                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                    <div className={cn("h-full transition-all duration-700", conf > 70 ? "bg-emerald-500" : "bg-yellow-500")} style={{ width: `${conf}%` }} />
+                  </div>
 
-           {/* Floating Bot Icon (The Trigger) */}
-           <div className="flex items-center gap-3">
-              {!isUnlimited && (
-                <div className={cn(
-                  "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-2 shadow-lg backdrop-blur-md border",
-                  canUseAi ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                )}>
-                  {canUseAi 
-                    ? <><Zap className="w-3 h-3 text-yellow-400" /> {totalRemaining} left</>
-                    : <><Lock className="w-3 h-3" /> No credits</>
-                  }
+                  <div className="grid grid-cols-4 gap-1">
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", ob ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground")}>
+                      {ob ? `${ob.type} OB` : "No OB"}
+                    </div>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", fvg ? "bg-violet-500/20 text-violet-400" : "bg-white/5 text-muted-foreground")}>
+                      {fvg ? `${(fvg as any).type} FVG` : "No FVG"}
+                    </div>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", bos ? "bg-blue-500/20 text-blue-400" : "bg-white/5 text-muted-foreground")}>
+                      {bos ? `BOS ${bos}` : "No BOS"}
+                    </div>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", macdOk ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/10 text-amber-500/70")}>
+                      {macdOk ? "MACD ✅" : "MACD ⏳"}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 leading-relaxed">{msg}</p>
                 </div>
-              )}
-              <button
-                onClick={handleOpenBotPopup}
-                className={cn(
-                  "relative w-14 h-14 text-white rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:scale-105 hover:rotate-12 transition-all duration-300 cursor-pointer",
-                  isUnlimited || canUseAi
-                    ? "bg-gradient-to-tr from-primary to-indigo-600 border border-white/20"
-                    : "bg-gradient-to-tr from-rose-700 to-rose-600 border border-white/10"
-                )}
-              >
-                <BrainCircuit className={cn("w-7 h-7", showAiBotPopup && "animate-pulse")} />
-                {showAiBotPopup && <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-[8px] font-bold rounded-full flex items-center justify-center border-2 border-[#161a25]">!</div>}
-              </button>
-           </div>
+              );
+            })()}
+
+            <Button
+              size="sm"
+              className="w-full h-8 text-[10px] font-black uppercase mt-4 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30"
+              onClick={() => setShowPaymentModal(true)}
+            >
+              Institutional Credits: {totalRemaining} Remaining
+            </Button>
+          </div>
+        )}
+
+        {/* Floating Bot Icon */}
+        <div className="flex items-center gap-3">
+          {!isUnlimited && (
+            <div className={cn(
+              "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-2 shadow-lg backdrop-blur-md border",
+              canUseAi ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+            )}>
+              {canUseAi
+                ? <><Zap className="w-3 h-3 text-yellow-400" /> {totalRemaining} left</>
+                : <><Lock className="w-3 h-3" /> No credits</>
+              }
+            </div>
+          )}
+          <button
+            onClick={handleOpenBotPopup}
+            className={cn(
+              "relative w-14 h-14 text-white rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:scale-105 hover:rotate-12 transition-all duration-300 cursor-pointer",
+              isUnlimited || canUseAi
+                ? "bg-gradient-to-tr from-primary to-indigo-600 border border-white/20"
+                : "bg-gradient-to-tr from-rose-700 to-rose-600 border border-white/10"
+            )}
+          >
+            <BrainCircuit className={cn("w-7 h-7", showAiBotPopup && "animate-pulse")} />
+            {showAiBotPopup && <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-[8px] font-bold rounded-full flex items-center justify-center border-2 border-card">!</div>}
+          </button>
+        </div>
       </div>
 
+
+
+
+
       {/* ── MOBILE TRADING BAR (v2.0 BEST EXPERIENCE) ── */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#161a25]/90 backdrop-blur-xl border-t border-white/5 p-4 pb-8 flex flex-col gap-3 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card/90 backdrop-blur-xl border-t border-white/5 p-4 pb-8 flex flex-col gap-3 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
          <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
                <div className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Investment</div>

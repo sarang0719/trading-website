@@ -168,7 +168,7 @@ export default function WalletPage() {
         key: data.keyId,
         amount: data.amount,
         currency: data.currency,
-        name: "QuantEdge Pro",
+        name: "QUANTEDGE V12.1 · SMC",
         description: "Wallet Deposit",
         image: "/favicon.ico",
         order_id: data.orderId,

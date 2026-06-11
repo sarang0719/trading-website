@@ -52,7 +52,7 @@ export default function AdminDashboard() {
 
   // Redirect non-admins (Institutional Gatekeeper)
   const isMaster = currentUser?.email === "saran123@gmail.com";
-  const isOperator = currentUser?.email === "htctrade@gmail.com";
+  const isOperator = currentUser?.email === "htctrade123@gmail.com";
 
   if (currentUser && !isMaster && !isOperator) {
      setLocation("/app");
@@ -329,7 +329,7 @@ export default function AdminDashboard() {
                        </div>
                        
                        <p className="mt-4 text-[10px] text-muted-foreground italic font-medium">
-                          The QuantEdge engine will automatically halt the bot for this user once their net P&L reaches the target profit or breaches the loss limit.
+                          The QUANTEDGE V12.1 · SMC engine will automatically halt the bot for this user once their net P&L reaches the target profit or breaches the loss limit.
                        </p>
                     </div>
                  </Card>
@@ -396,30 +396,31 @@ export default function AdminDashboard() {
                   </Card>
 
                   {/* Trade Pulse */}
-                  <Card className="md:col-span-2 border-border/40 shadow-sm overflow-hidden">
-                    <CardHeader className="py-4 border-b border-border/10 flex flex-row items-center justify-between">
+                  <Card className="md:col-span-2 border-border/40 shadow-sm flex flex-col h-[500px]">
+                    <CardHeader className="py-4 border-b border-border/10 flex flex-row items-center justify-between shrink-0">
                       <CardTitle className="text-sm font-bold flex items-center gap-2">
-                        <BarChart3 className="h-4 w-4 text-primary" /> Active Trade Inventory
+                        <BarChart3 className="h-4 w-4 text-primary" /> Trading History
                       </CardTitle>
                       <div className="flex gap-2">
                          <Badge variant="outline" className="text-[9px] bg-primary/5">{detail.trades.standard.length} Fixed</Badge>
-                         <Badge variant="outline" className="text-[9px] bg-accent/5">{detail.trades.timeBased.length} Time-Based</Badge>
+                         <Badge variant="outline" className="text-[9px] bg-accent/5">{detail.trades.timeBased.length} Binary Options</Badge>
                       </div>
                     </CardHeader>
-                    <CardContent className="p-0">
-                       <div className="w-full overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                             <thead>
-                                <tr className="bg-muted/50 text-[10px] uppercase tracking-tighter text-muted-foreground/80">
+                    <CardContent className="p-0 flex-1 overflow-hidden flex flex-col">
+                       <div className="w-full flex-1 overflow-y-auto custom-scrollbar">
+                          <table className="w-full text-left border-collapse relative">
+                             <thead className="sticky top-0 bg-card/95 backdrop-blur z-10 shadow-sm">
+                                <tr className="text-[10px] uppercase tracking-tighter text-muted-foreground/80">
                                    <th className="px-6 py-3 font-bold">Market</th>
                                    <th className="px-6 py-3 font-bold">Type</th>
+                                   <th className="px-6 py-3 font-bold">Duration</th>
                                    <th className="px-6 py-3 font-bold text-right">Investment</th>
                                    <th className="px-6 py-3 font-bold text-right">Result</th>
                                    <th className="px-6 py-3 font-bold text-right">Date</th>
                                 </tr>
                              </thead>
                              <tbody className="divide-y divide-border/10">
-                                {[...detail.trades.standard, ...detail.trades.timeBased].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8).map((trade, i) => (
+                                {[...detail.trades.standard, ...detail.trades.timeBased].sort((a,b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).map((trade, i) => (
                                   <tr key={i} className="hover:bg-primary/5 transition-all">
                                      <td className="px-6 py-3.5 text-xs font-bold">{trade.instrumentSymbol || "GOLD"}</td>
                                      <td className="px-6 py-3.5">
@@ -427,11 +428,14 @@ export default function AdminDashboard() {
                                            {trade.side}
                                         </Badge>
                                      </td>
-                                     <td className="px-6 py-3.5 text-xs text-right font-mono font-bold">₹{parseFloat(trade.amount).toLocaleString()}</td>
-                                     <td className={`px-6 py-3.5 text-xs text-right font-bold ${trade.status === 'WIN' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                     <td className="px-6 py-3.5 text-xs text-muted-foreground font-mono">
+                                        {trade.durationSeconds ? `${trade.durationSeconds}s` : "—"}
+                                     </td>
+                                     <td className="px-6 py-3.5 text-xs text-right font-mono font-bold">₹{parseFloat(trade.amount || trade.quantity || "0").toLocaleString()}</td>
+                                     <td className={`px-6 py-3.5 text-xs text-right font-bold ${trade.status === 'WIN' ? 'text-emerald-500' : trade.status === 'LOSS' ? 'text-rose-500' : 'text-primary animate-pulse'}`}>
                                         {trade.status}
                                      </td>
-                                     <td className="px-6 py-3.5 text-[10px] text-right text-muted-foreground">{format(new Date(trade.createdAt), "MMM d")}</td>
+                                     <td className="px-6 py-3.5 text-[10px] text-right text-muted-foreground">{format(new Date(trade.createdAt), "MMM d, HH:mm")}</td>
                                   </tr>
                                 ))}
                              </tbody>

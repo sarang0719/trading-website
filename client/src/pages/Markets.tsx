@@ -104,10 +104,11 @@ export default function Markets() {
     let wsTwelve: WebSocket | null = null;
     let binanceRecoTimer: ReturnType<typeof setTimeout> | null = null;
     let twelveRecoTimer:  ReturnType<typeof setTimeout> | null = null;
+    let wsInitTimer:      ReturnType<typeof setTimeout> | null = null;
     let binanceDelay = 1000;
     let twelveDelay  = 1000;
 
-    const binanceInsts = instruments.data.filter((i: any) => i.exchange === "BINANCE");
+    const binanceInsts = instruments.data.filter((i: any) => i.exchange === "BINANCE" && i.symbol !== "XAUUSD");
     const tdInsts      = instruments.data.filter((i: any) => i.exchange !== "BINANCE" && i.exchange !== "OTC");
 
     // ── Binance !miniTicker (all symbols at once) ──────────────────────────
@@ -152,7 +153,9 @@ export default function Markets() {
         };
 
         wsBinance.onerror = () => {
-          try { wsBinance?.close(); } catch {}
+          if (wsBinance) wsBinance.onclose = null;
+          if (!isActive) return;
+          binanceRecoTimer = setTimeout(() => { binanceDelay = Math.min(binanceDelay * 2, 30000); connectBinance(); }, binanceDelay);
         };
       } catch {}
     };
@@ -170,7 +173,7 @@ export default function Markets() {
       }).join(",");
 
       try {
-        wsTwelve = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=5703b6c3bb53485bbf9b57232c9c59b1");
+        wsTwelve = new WebSocket("wss://ws.twelvedata.com/v1/quotes/price?apikey=4a3bb708bb7247528d0efe958476bdaa");
 
         wsTwelve.onopen = () => {
           twelveDelay = 1000;
@@ -206,20 +209,44 @@ export default function Markets() {
         };
 
         wsTwelve.onerror = () => {
-          try { wsTwelve?.close(); } catch {}
+          if (wsTwelve) wsTwelve.onclose = null;
+          if (!isActive) return;
+          twelveRecoTimer = setTimeout(() => { twelveDelay = Math.min(twelveDelay * 2, 30000); connectTwelve(); }, twelveDelay);
         };
       } catch {}
     };
 
-    connectBinance();
-    connectTwelve();
+    // Delay by 150ms to let React StrictMode double-mount flush complete
+    // before creating any WebSocket — eliminates "closed before established" warnings
+    wsInitTimer = setTimeout(() => {
+      if (!isActive) return;
+      connectBinance();
+      connectTwelve();
+    }, 150);
 
     return () => {
       isActive = false;
+      if (wsInitTimer)      clearTimeout(wsInitTimer);
       if (binanceRecoTimer) clearTimeout(binanceRecoTimer);
       if (twelveRecoTimer)  clearTimeout(twelveRecoTimer);
-      if (wsBinance) { wsBinance.onclose = null; try { wsBinance.close(); } catch {} }
-      if (wsTwelve)  { wsTwelve.onclose  = null; try { wsTwelve.close();  } catch {} }
+      if (wsBinance) {
+        wsBinance.onclose = null;
+        wsBinance.onerror = null;
+        if (wsBinance.readyState !== WebSocket.CLOSED) {
+          try {
+            wsBinance.close();
+          } catch {}
+        }
+      }
+      if (wsTwelve) {
+        wsTwelve.onclose = null;
+        wsTwelve.onerror = null;
+        if (wsTwelve.readyState !== WebSocket.CLOSED) {
+          try {
+            wsTwelve.close();
+          } catch {}
+        }
+      }
     };
   }, [instruments.data]);
 
@@ -254,7 +281,7 @@ export default function Markets() {
 
   return (
     <AppShell title="Live Markets" subtitle="Professional fast-execution trading environment">
-      <Seo title="Markets • QuantEdge Pro" description="Trade real-time Forex, Crypto, Stocks, and OTC Markets." />
+      <Seo title="Markets • QUANTEDGE V12.1 · SMC" description="Trade real-time Forex, Crypto, Stocks, and OTC Markets." />
 
       {/* Top action bar */}
       <div className="flex flex-col lg:flex-row gap-4 mb-6">

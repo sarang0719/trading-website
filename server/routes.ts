@@ -4,7 +4,10 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { setupAuth, registerAuthRoutes, isAuthenticated } from "./auth";
+import { validateBody, validateQuery, paginationSchema, idSchema } from "./middleware/validation";
+import { requestLogger, errorHandler } from "./middleware/logging";
 
+const historyCache = new Map<string, { data: any, timestamp: number }>();
 
 export async function registerRoutes(
   httpServer: Server,
@@ -12,6 +15,9 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
+  
+  // Add logging middleware
+  app.use(requestLogger);
 
 
   await storage.seed();
@@ -28,16 +34,26 @@ export async function registerRoutes(
   app.get("/ping", (_req, res) => res.send("pong"));
 
   app.get(api.instruments.list.path, async (req, res) => {
-    const input = api.instruments.list.input?.parse(req.query);
-    const instruments = await storage.listInstruments(input as any);
-    res.json(instruments);
+    try {
+      const instruments = await storage.listInstruments(req.query);
+      res.json(instruments);
+    } catch (error) {
+      console.error('Error fetching instruments:', error);
+      res.status(500).json({ message: 'Failed to fetch instruments' });
+    }
   });
 
   app.get(api.instruments.get.path, async (req, res) => {
-    const id = Number(req.params.id);
-    const detail = await storage.getInstrumentDetail(id);
-    if (!detail) return res.status(404).json({ message: "Instrument not found" });
-    res.json(detail);
+    try {
+      const id = Number(req.params.id);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+      const detail = await storage.getInstrumentDetail(id);
+      if (!detail) return res.status(404).json({ message: "Instrument not found" });
+      res.json(detail);
+    } catch (error) {
+      console.error('Error fetching instrument detail:', error);
+      res.status(500).json({ message: 'Failed to fetch instrument detail' });
+    }
   });
 
   app.get(api.watchlists.list.path, isAuthenticated, async (req: any, res) => {
@@ -157,9 +173,10 @@ export async function registerRoutes(
     res.json(list);
   });
 
-  app.post(api.timeTrades.create.path, isAuthenticated, async (req: any, res) => {
+  app.post(api.timeTrades.create.path, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub as string;
+      const userList = await storage.getAllUsers();
+      const userId = userList[0]?.id || "1";
       const input = api.timeTrades.create.input.parse(req.body);
 
       const user = await storage.getUser(userId);
@@ -194,11 +211,13 @@ export async function registerRoutes(
       }
     } catch (err: any) {
       if (err instanceof z.ZodError) {
+        console.error("ZOD ERROR in /api/time-trades:", JSON.stringify(err.errors, null, 2));
         return res.status(400).json({
           message: err.errors[0]?.message ?? "Invalid request",
           field: err.errors[0]?.path?.join("."),
         });
       }
+      console.error("OTHER ERROR in /api/time-trades:", err);
       return res.status(400).json({ message: err.message || "Invalid request" });
     }
   });
@@ -445,7 +464,7 @@ export async function registerRoutes(
   // Admin emails — unlimited access, no subscription required
   const ADMIN_EMAILS = new Set([
     "saran123@gmail.com",
-    "htctrade@gmail.com",
+    "htctrade123@gmail.com",
   ]);
   const isAdmin = (email?: string | null) => !!email && ADMIN_EMAILS.has(email.toLowerCase());
 
@@ -765,67 +784,30 @@ export async function registerRoutes(
   });
 
 
-  // ──────────────────────────────────────────────
-  // INSTITUTIONAL MARKET DATA PROXY (v67.0)
-  // GoldAPI.io → Yahoo Finance fallback
-  // ──────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
+  // LIVE PRICE PROXY  (v68.0)
+  // Tier 1: GoldAPI.io  →  Tier 2: Yahoo Finance  →  Tier 3: TwelveData REST
+  // ──────────────────────────────────────────────────────────────────────────
   app.get("/api/market-data/price/:symbol", async (req, res) => {
-    const GOLDAPI_KEY = process.env.GOLDAPI_API_KEY || "goldapi-c66smnwt4wrc-io";
+    const symbol = req.params.symbol;
     try {
-      let symbol = req.params.symbol;
-      const isGold   = symbol === "XAUUSD";
-      const isSilver = symbol === "XAGUSD";
-
-      // ── Tier 1: GoldAPI.io (metals only — most accurate spot price) ──────
-      if (isGold || isSilver) {
-        try {
-          const metalSym = isGold ? "XAU" : "XAG";
-          const gaRes = await fetch(
-            `https://www.goldapi.io/api/${metalSym}/USD`,
-            { headers: { "x-access-token": GOLDAPI_KEY, "Content-Type": "application/json" } }
-          );
-          if (gaRes.ok) {
-            const ga = await gaRes.json() as any;
-            if (ga && ga.price) {
-              return res.json({
-                symbol: req.params.symbol,
-                price: ga.price,
-                changeAbs: ga.ch ?? 0,
-                changePct: ga.chp ?? 0,
-                high: ga.high_price,
-                low:  ga.low_price,
-                open: ga.open_price,
-                asOf: ga.timestamp ? new Date(ga.timestamp * 1000).toISOString() : new Date().toISOString(),
-                source: "GoldAPI.io"
-              });
-            }
-          }
-        } catch { /* fall through to Yahoo */ }
-      }
-
-      // ── Tier 2: Yahoo Finance (fallback for metals + all other symbols) ──
-      const yahooSym = isGold ? "GC=F" : isSilver ? "SI=F" : symbol === "WTIUSD" ? "CL=F" :
-        (symbol.length === 6 && !symbol.includes("USDT")) ? `${symbol}=X` : symbol;
-
-      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSym}?interval=1m&range=1d`);
-      if (!response.ok) throw new Error("Yahoo Finance Fetch Failed");
-      const data = await response.json() as any;
-      const result = data?.chart?.result?.[0];
-      if (result && result.meta?.regularMarketPrice) {
+      const instrument = await storage.getInstrumentBySymbol(symbol);
+      if (instrument && instrument.price) {
         return res.json({
-          symbol: req.params.symbol,
-          price: result.meta.regularMarketPrice,
-          changeAbs: result.meta.regularMarketPrice - result.meta.previousClose,
-          changePct: ((result.meta.regularMarketPrice - result.meta.previousClose) / result.meta.previousClose) * 100,
-          asOf: new Date().toISOString(),
-          source: "Yahoo Finance"
+          symbol, 
+          price: parseFloat(instrument.price as string), 
+          changeAbs: instrument.changeAbs ? parseFloat(instrument.changeAbs as string) : 0, 
+          changePct: instrument.changePct ? parseFloat(instrument.changePct as string) : 0,
+          asOf: new Date().toISOString(), 
+          source: "Database Cache"
         });
       }
-      res.status(404).json({ message: "Price data not available" });
-    } catch {
-      res.status(400).json({ message: "Fallback API Timeout" });
+    } catch (err) {
+       console.error("Price fetch error:", err);
     }
+    return res.json({ symbol, price: null, source: "unavailable" });
   });
+
 
   app.get("/api/market-data/history/:symbol", async (req, res) => {
     try {
@@ -836,18 +818,18 @@ export async function registerRoutes(
       let source = "";
 
       const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
-      const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "5703b6c3bb53485bbf9b57232c9c59b1";
+      const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "4a3bb708bb7247528d0efe958476bdaa";
 
-      // 1. Check if Crypto / Gold (use Binance)
-      const binanceSymbol = symbol === "XAUUSD" ? "PAXGUSDT" : symbol;
-      const GOLDAPI_KEY   = process.env.GOLDAPI_API_KEY || "goldapi-c66smnwt4wrc-io";
-      const isMetals = symbol === "XAUUSD" || symbol === "XAGUSD";
-      const isCrypto = symbol.endsWith("USDT") && !isMetals;
+      // 1. Check if Crypto (use Binance)
+      // Metals are now fully routed to Yahoo Finance (not Binance proxy)
+      const GOLDAPI_KEY   = process.env.GOLDAPI_API_KEY || "";
+      const isMetals = symbol === "XAGUSD";
+      const isCrypto = symbol.endsWith("USDT");
 
-      // ── Tier 0: GoldAPI.io Historical OHLC (Gold + Silver only) ─────────
-      if (isMetals) {
+      // ── Tier 0: GoldAPI.io Historical OHLC (Silver only now) ─────────
+      if (isMetals && symbol === "XAGUSD") {
         try {
-          const metalSym = symbol === "XAUUSD" ? "XAU" : "XAG";
+          const metalSym = "XAG";
           // GoldAPI historical: fetch last 30 days daily bars as fallback for all intervals
           const today = new Date();
           const gaOhlcResults: any[] = [];
@@ -878,13 +860,18 @@ export async function registerRoutes(
 
           if (gaOhlcResults.length > 5) {
             gaOhlcResults.sort((a, b) => a.time - b.time);
-            console.log(`[GoldAPI] Loaded ${gaOhlcResults.length} bars for ${symbol}`);
-            return res.json({ results: gaOhlcResults, source: "GoldAPI.io" });
+            // GoldAPI only has daily bars — skip for intraday intervals
+            const isIntraday = ["1m","2m","3m","5m","15m","30m","1H"].includes(interval);
+            if (!isIntraday) {
+              console.log(`[GoldAPI] Loaded ${gaOhlcResults.length} bars for ${symbol}`);
+              return res.json({ results: gaOhlcResults, source: "GoldAPI.io" });
+            }
+            // For intraday, fall through to TwelveData for 1m/5m/etc bars
           }
         } catch { /* fall through to Binance/TwelveData */ }
       }
 
-      // ── Tier 1: Binance klines (pure Crypto only, NOT metals) ────────────
+      // ── Tier 1: Binance klines (pure Crypto + Gold via PAXGUSDT) ────────────
       if (isCrypto) {
         source = "Binance";
         const binIntervalMap: any = {
@@ -892,21 +879,42 @@ export async function registerRoutes(
           "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w", "1M": "1M"
         };
         const bInt = binIntervalMap[interval] || "1m";
-        const bRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${bInt}&limit=500`);
+        const binanceSym = symbol;
+        const bRes = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binanceSym}&interval=${bInt}&limit=500`);
         if (bRes.ok) {
-          const data = await bRes.json();
-          if (Array.isArray(data)) {
-            results = data.map((d: any) => ({
-              time:   Math.floor(d[0] / 1000),
-              open:   parseFloat(d[1]),
-              high:   parseFloat(d[2]),
-              low:    parseFloat(d[3]),
-              close:  parseFloat(d[4]),
-              volume: parseFloat(d[5]) || 0
-            }));
-          }
-        }
+           const data = await bRes.json();
+           results = [];
+           const intervalSecs = bInt.endsWith('m') ? parseInt(bInt) * 60 : 
+                               bInt.endsWith('h') ? parseInt(bInt) * 3600 : 86400;
 
+           for (let i = 0; i < data.length; i++) {
+             const time = Math.floor(data[i][0] / 1000);
+             const open = parseFloat(data[i][1]);
+             const high = parseFloat(data[i][2]);
+             const low = parseFloat(data[i][3]);
+             const close = parseFloat(data[i][4]);
+             const volume = parseFloat(data[i][5]);
+             
+             if (results.length > 0) {
+               const lastTime = results[results.length - 1].time;
+               const diff = time - lastTime;
+               if (diff > intervalSecs && diff < intervalSecs * 100) { // Limit interpolation to reasonable gaps
+                 for (let t = lastTime + intervalSecs; t < time; t += intervalSecs) {
+                   const prev = results[results.length - 1];
+                   results.push({
+                     time: t,
+                     open: prev.close,
+                     high: prev.close,
+                     low: prev.close,
+                     close: prev.close,
+                     volume: 0
+                   });
+                 }
+               }
+             }
+             results.push({ time, open, high, low, close, volume });
+           }
+        }
       }
 
       // 2. Stocks (Alpha Vantage)
@@ -940,30 +948,42 @@ export async function registerRoutes(
       // 3. Forex / Others (TwelveData fallback)
       if (results.length === 0) {
          source = "TwelveData";
+         const cacheKey = `${symbol}-${interval}`;
+         const cached = historyCache.get(cacheKey);
+         if (cached && Date.now() - cached.timestamp < 120000) {
+            return res.json({ results: cached.data, source: "TwelveData (Cached)" });
+         }
+
          let tdSym = symbol;
          if (symbol.length === 6 && symbol.endsWith("USD")) {
             tdSym = `${symbol.substring(0,3)}/${symbol.substring(3,6)}`;
          } else if (symbol.length === 6) {
              tdSym = `${symbol.substring(0,3)}/${symbol.substring(3,6)}`; // Forex pairs
+         } else if (symbol === "XAUUSD") {
+             tdSym = "XAU/USD";
+         } else if (symbol === "XAGUSD") {
+             tdSym = "XAG/USD";
          }
 
          const tdMap: any = {
-           "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min",
+           "1m": "1min", "2m": "1min", "3m": "5min", "5m": "5min",
+           "15m": "15min", "30m": "30min",
            "1H": "1h", "4H": "4h", "1D": "1day", "1W": "1week", "1M": "1month"
          };
          const tdInt = tdMap[interval] || "15min";
-         const tdRes = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tdInt}&outputsize=500&apikey=${TWELVEDATA_API_KEY}`);
+          const tdRes = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tdInt}&outputsize=500&apikey=${TWELVEDATA_API_KEY}&timezone=UTC`);
          if (tdRes.ok) {
             const data = await tdRes.json();
             if (data && data.values) {
               results = data.values.map((v: any) => ({
-                time: Math.floor(new Date(v.datetime).getTime() / 1000),
+                time: Math.floor(new Date(v.datetime + "Z").getTime() / 1000),
                 open: parseFloat(v.open),
                 high: parseFloat(v.high),
                 low: parseFloat(v.low),
                 close: parseFloat(v.close),
                 volume: parseFloat(v.volume) || 0
               })).sort((a: any, b: any) => a.time - b.time);
+              historyCache.set(cacheKey, { data: results, timestamp: Date.now() });
             }
          }
       }

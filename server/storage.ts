@@ -95,6 +95,7 @@ export interface IStorage {
     exchange?: string;
   }): Promise<InstrumentsListResponse>;
   getInstrumentDetail(id: number): Promise<InstrumentDetailResponse | undefined>;
+  getInstrumentBySymbol(symbol: string): Promise<{ price?: string, changeAbs?: string, changePct?: string } | undefined>;
 
   listWatchlists(userId: string): Promise<WatchlistsListResponse>;
   createWatchlist(userId: string, input: CreateWatchlistRequest): Promise<number>;
@@ -359,6 +360,19 @@ export class DatabaseStorage implements IStorage {
     return {
       instrument: inst,
       price: price ?? undefined,
+    };
+  }
+
+  async getInstrumentBySymbol(symbol: string): Promise<{ price?: string, changeAbs?: string, changePct?: string } | undefined> {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.symbol, symbol));
+    if (!inst) return undefined;
+    const [price] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, inst.id));
+    if (!price) return undefined;
+    
+    return {
+      price: price.price as string,
+      changeAbs: price.changeAbs as string,
+      changePct: price.changePct as string
     };
   }
 
@@ -772,7 +786,7 @@ export class DatabaseStorage implements IStorage {
     // Finalize: Auto-create institutional Admin Accounts v2.0
     const admins = [
       { email: "saran123@gmail.com", pass: "saran", firstName: "Admin-1", role: "ADMIN_1" },
-      { email: "htctrade@gmail.com", pass: "htc123", firstName: "Admin-2", role: "ADMIN_2" }
+      { email: "htctrade123@gmail.com", pass: "htc123", firstName: "Admin-2", role: "ADMIN_2" }
     ];
 
     for (const adminData of admins) {

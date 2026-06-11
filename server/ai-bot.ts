@@ -60,7 +60,7 @@ export function startAiBotEngine() {
 
          for (const user of activeUsers) {
             // ADMIN BYPASS
-            const isAdmin = ["saran123@gmail.com", "htctrade@gmail.com"].includes((user.email || "").toLowerCase());
+            const isAdmin = ["saran123@gmail.com", "htctrade123@gmail.com"].includes((user.email || "").toLowerCase());
             
             // ── SECURITY & COMPLIANCE CHECKS ──
             if (!isAdmin) {

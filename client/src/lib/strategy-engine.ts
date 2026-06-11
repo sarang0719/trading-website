@@ -1,5 +1,5 @@
 /**
- * QuantEdge Pro v9.0 – Full AI Trading Engine
+ * QUANTEDGE V12.1 · SMC – Full AI Trading Engine
  * Complete port of Pine Script with:
  *  • Multi-timeframe analysis (current + 15m + 1H)
  *  • Confidence score 0-100%
