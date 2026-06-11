@@ -206,7 +206,7 @@ export function startBackgroundTasks() {
     try {
       const allInstruments = await db.select().from(instruments).where(eq(instruments.isActive, true));
       // Absorption Logic: If Binance WS is geoblocked, we absorb Crypto into the polling loop
-      const activeInstruments = allInstruments.filter(i => {
+      const activeInstruments = allInstruments.filter((i: typeof allInstruments[number]) => {
          if (i.assetClass === "CRYPTO") return isBinanceGeoBlocked;
          return true;
       });
