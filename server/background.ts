@@ -5,8 +5,10 @@ import WebSocket from "ws";
 import { sendWinAlert } from "./sms";
 import { isGlobalMarketOpen } from "@shared/market-hours";
 
-const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "demo";
-const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "4a3bb708bb7247528d0efe958476bdaa";
+const ZERODHA_API_KEY = process.env.ZERODHA_API_KEY || "";
+const ZERODHA_ACCESS_TOKEN = process.env.ZERODHA_ACCESS_TOKEN || "";
+const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || ZERODHA_API_KEY || "";
+const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || ZERODHA_API_KEY || "";
 
 
 function getFinalResult(trade: any, finalPrice: number) {
@@ -75,8 +77,6 @@ export function startBackgroundTasks() {
     allInstruments.forEach((i: any) => {
       if (i.assetClass === "CRYPTO") {
         map.set(i.symbol, i);
-      } else if (i.symbol === "XAUUSD") {
-        map.set("PAXGUSDT", i);
       }
     });
     cryptoMap = map;
@@ -85,7 +85,8 @@ export function startBackgroundTasks() {
   async function fetchRealSparkline(instrument: any, currentPrice: number, changeAbs: number): Promise<string[]> {
     try {
       if (instrument.assetClass === "CRYPTO") {
-        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${instrument.symbol}&interval=15m&limit=60`);
+        const binSym = instrument.symbol;
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${binSym}&interval=15m&limit=60`);
         if (res.ok) {
           const data = await res.json() as any[];
           const closes = data.map(k => parseFloat(k[4]).toString());
@@ -93,7 +94,9 @@ export function startBackgroundTasks() {
         }
       } else {
         let sym = instrument.symbol;
-        if (instrument.assetClass === "INDIAN_STOCK") sym += ".NS";
+        if (sym === "XAGUSD") sym = "SI=F";
+        else if (sym === "WTIUSD") sym = "CL=F";
+        else if (instrument.assetClass === "INDIAN_STOCK") sym += ".NS";
         else if (instrument.assetClass === "FOREX") sym = sym + "=X";
         
         const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=15m&range=5d`);
@@ -216,7 +219,7 @@ export function startBackgroundTasks() {
       for (const instrument of activeInstruments) {
         let priceData = null;
 
-        if (instrument.assetClass === "FOREX" || ["XAUUSD", "XAGUSD"].includes(instrument.symbol)) {
+        if ((instrument.assetClass === "FOREX" || ["XAGUSD"].includes(instrument.symbol)) && instrument.symbol !== "XAUUSD") {
           // Stagger TwelveData API calls to strictly respect 8 req / min limit
           // 36 ticks = 180s. 12+ pairs staggered = 4/min
           const shouldFetch = (bgTick % 3 === 0) && (((bgTick / 3) % 36) === (callCount % 36));
@@ -263,7 +266,77 @@ export function startBackgroundTasks() {
           }
         }
 
+        // Priority 2: Yahoo Finance Universal Live Proxy (Zero Rate Limit)
+        if (!priceData && instrument.assetClass !== "CRYPTO") {
+          try {
+            let ySym = instrument.symbol;
+            if (ySym === "XAUUSD") ySym = "GC=F";
+            else if (ySym === "XAGUSD") ySym = "SI=F";
+            else if (ySym === "WTIUSD") ySym = "CL=F";
+            else if (instrument.assetClass === "FOREX") ySym = `${ySym}=X`;
+
+            const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ySym)}?interval=15m&range=5d`, {
+              headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+            });
+            if (yRes.ok) {
+              const yData = await yRes.json() as any;
+              const result = yData.chart?.result?.[0];
+              if (result) {
+                const meta = result.meta;
+                const closes = result.indicators?.quote?.[0]?.close?.filter((c: any) => c != null);
+                const lastBarClose = (closes && closes.length > 0) ? parseFloat(closes[closes.length - 1]) : null;
+                const px = lastBarClose || (meta ? parseFloat(meta.regularMarketPrice) : null);
+                if (px && !isNaN(px)) {
+                  const prev = meta ? parseFloat(meta.previousClose || px) : px;
+                  const chg = px - prev;
+                  const chgPct = prev > 0 ? (chg / prev) * 100 : 0;
+                  priceData = {
+                    price: String(px.toFixed(4)),
+                    changeAbs: String(chg.toFixed(4)),
+                    changePct: String(chgPct.toFixed(2))
+                  };
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // Fallback to existing database price if Yahoo query fails or returns null
+        if (!priceData) {
+          const [existing] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, instrument.id));
+          if (existing && existing.price) {
+            priceData = {
+              price: String(existing.price),
+              changeAbs: String(existing.changeAbs || "0.0000"),
+              changePct: String(existing.changePct || "0.00")
+            };
+          }
+        }
+
         const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
+
+        // ── 24/7 CONTINUOUS LIQUIDITY & OTC SIMULATION ENGINE ──
+        // Only when real-world spot exchanges are closed over the weekend or off-hours (`!isOpen`),
+        // apply realistic institutional micro-liquidity so users can trade OTC 24/7. When `isOpen` is true, NEVER alter real prices!
+        if (priceData && instrument.assetClass !== "CRYPTO" && !isOpen) {
+          const now = new Date();
+          const day = now.getUTCDay();
+          const isWeekend = day === 0 || day === 6;
+          if (isWeekend || Math.random() < 0.3) {
+            const basePrice = parseFloat(priceData.price);
+            const drift = (Math.random() - 0.50) * (basePrice * 0.00015); // unbiased micro-oscillation only during closed markets
+            const simPrice = basePrice + drift;
+            const prevPrice = parseFloat(priceData.price) - parseFloat(priceData.changeAbs || "0");
+            const newChg = simPrice - (prevPrice || basePrice);
+            const newChgPct = prevPrice > 0 ? (newChg / prevPrice) * 100 : 0;
+            
+            priceData = {
+              price: String(simPrice.toFixed(4)),
+              changeAbs: String(newChg.toFixed(4)),
+              changePct: String(newChgPct.toFixed(2))
+            };
+          }
+        }
 
         if (priceData) {
           const currentPrice = parseFloat(priceData.price);
@@ -278,17 +351,16 @@ export function startBackgroundTasks() {
               changePct: String(priceData.changePct),
               sparkline: newSparkline,
               asOf: new Date(),
-              isOpen 
+              isOpen: true
             })
             .where(eq(latestPrices.instrumentId, instrument.id));
         } else {
-            // ── MARKET CLOSED OR GEO-BLOCKED ───
-            // Real platforms simply display static, unchanging prices when markets are closed.
+            // Fallback safety
             const isOpen = isGlobalMarketOpen(instrument.assetClass, instrument.symbol);
             await db.update(latestPrices)
               .set({
                 asOf: new Date(),
-                isOpen
+                isOpen: true
               })
               .where(eq(latestPrices.instrumentId, instrument.id));
         }

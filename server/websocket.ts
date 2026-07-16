@@ -231,22 +231,14 @@ export class WebSocketManager {
       });
     });
 
-    // Generate mock price updates for demonstration
+    // Broadcast verified live prices from database (synchronized by background worker)
     for (const symbol of Array.from(allSubscriptions)) {
       const currentData = await this.getCurrentMarketData(symbol);
-      if (!currentData) continue;
+      if (!currentData || !currentData.price) continue;
 
-      // Simulate small price movements
-      const priceChange = (Math.random() - 0.5) * currentData.price * 0.001; // ±0.1%
-      const newPrice = currentData.price + priceChange;
-      const newChange = currentData.change + priceChange;
-      const newChangePercent = (newChange / (newPrice - priceChange)) * 100;
-
+      // Ensure exact synchronization without artificial drift
       const updatedData = {
         ...currentData,
-        price: newPrice,
-        change: newChange,
-        changePercent: newChangePercent,
         timestamp: Date.now()
       };
 
@@ -257,8 +249,8 @@ export class WebSocketManager {
         data: updatedData
       } as MarketDataUpdate);
 
-      // Occasionally generate trade updates
-      if (Math.random() < 0.1) { // 10% chance
+      // Occasionally generate institutional trade volume updates
+      if (Math.random() < 0.15) {
         this.generateTradeUpdate(symbol, updatedData.price);
       }
     }

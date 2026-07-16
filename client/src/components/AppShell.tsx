@@ -1,4 +1,4 @@
-import { ReactNode, useMemo } from "react";
+import { ReactNode, useMemo, useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Activity,
@@ -14,11 +14,22 @@ import {
   Users,
   Check,
   CreditCard,
-  ChevronDown
+  ChevronDown,
+  Search,
+  Menu,
+  Bell,
+  Rocket,
+  HelpCircle,
+  User,
+  Trophy,
+  Store,
+  MoreHorizontal,
+  BarChart2
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import ThemeToggle from "./ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
+import { useInstruments } from "@/hooks/use-instruments";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -32,9 +43,33 @@ type NavItem = {
 
 export default function AppShell(props: { children: ReactNode; title?: string; subtitle?: string; noPadding?: boolean; hideMobileNav?: boolean }) {
   const { children, title, subtitle, noPadding, hideMobileNav } = props;
-  const [loc] = useLocation();
+  const [loc, setLoc] = useLocation();
   const { user, logout, isLoggingOut } = useAuth();
+  
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const { data: searchResults } = useInstruments({ q: searchQuery });
+  const searchRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setIsSearchOpen(true);
+      }
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   const isAdmin = useMemo(() => {
     if (!user) return false;
@@ -249,11 +284,66 @@ export default function AppShell(props: { children: ReactNode; title?: string; s
                </PopoverContent>
              </Popover>
 
-             {/* Symbol search */}
-             <div className="relative hidden lg:block ml-2">
-               <input type="text" placeholder="Symbol search..." className="bg-secondary/30 border border-border/50 rounded-lg px-3 py-1.5 text-xs font-semibold w-56 focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all" />
-               <div className="absolute right-2 top-1.5 text-[9px] font-bold text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border/30">⌘ K</div>
-            </div>
+             {/* Interactive Symbol Search */}
+             <div className="relative hidden lg:block ml-2" ref={searchRef}>
+               <div className="relative flex items-center">
+                 <Search className="w-3.5 h-3.5 absolute left-3 text-muted-foreground" />
+                 <input
+                   type="text"
+                   value={searchQuery}
+                   onChange={(e) => { setSearchQuery(e.target.value); setIsSearchOpen(true); }}
+                   onFocus={() => setIsSearchOpen(true)}
+                   placeholder="Symbol search..."
+                   className="bg-secondary/30 border border-border/50 rounded-xl pl-9 pr-12 py-1.5 text-xs font-semibold w-60 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all shadow-inner"
+                 />
+                 <div
+                   onClick={() => setIsSearchOpen(!isSearchOpen)}
+                   className="absolute right-2 top-1.5 text-[9px] font-bold text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border/30 cursor-pointer hover:border-primary/40 transition-colors"
+                 >
+                   ⌘ K
+                 </div>
+               </div>
+
+               {isSearchOpen && (
+                 <div className="absolute right-0 top-full mt-2 w-72 bg-[#0c101c]/95 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl z-[1002] overflow-hidden animate-in fade-in-0 zoom-in-95">
+                   <div className="p-2 border-b border-border/20 text-[10px] font-extrabold uppercase tracking-widest text-muted-foreground">
+                     {searchQuery ? `Results for "${searchQuery}"` : "Quick Markets"}
+                   </div>
+                   <div className="max-h-64 overflow-y-auto p-1 space-y-1">
+                     {(Array.isArray(searchResults) ? searchResults : []).slice(0, 6).map((inst: any) => (
+                       <div
+                         key={inst.id}
+                         onClick={() => {
+                           setLoc(`/app/markets/${inst.id}`);
+                           setIsSearchOpen(false);
+                           setSearchQuery("");
+                         }}
+                         className="flex items-center justify-between p-2 rounded-xl hover:bg-primary/15 cursor-pointer transition-all group"
+                       >
+                         <div className="flex items-center gap-2.5">
+                           <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 grid place-items-center font-bold text-xs text-primary group-hover:scale-105 transition-transform">
+                             {inst.symbol.slice(0, 2)}
+                           </div>
+                           <div className="flex flex-col">
+                             <span className="text-xs font-bold text-foreground group-hover:text-primary transition-colors">{inst.symbol}</span>
+                             <span className="text-[10px] text-muted-foreground truncate max-w-[120px]">{inst.name}</span>
+                           </div>
+                         </div>
+                         <div className="flex flex-col items-end">
+                           <span className="text-xs font-mono font-bold">${inst.price || "0.00"}</span>
+                           <span className={cn("text-[10px] font-bold", Number(inst.changePct || 0) >= 0 ? "text-[#0ecb81]" : "text-[#f6465d]")}>
+                             {Number(inst.changePct || 0) >= 0 ? "+" : ""}{Number(inst.changePct || 0).toFixed(2)}%
+                           </span>
+                         </div>
+                       </div>
+                     ))}
+                     {(!searchResults || (Array.isArray(searchResults) && searchResults.length === 0)) && (
+                       <div className="p-4 text-center text-xs text-muted-foreground">No matching markets found</div>
+                     )}
+                   </div>
+                 </div>
+               )}
+             </div>
             <div className="lg:hidden"><ThemeToggle /></div>
           </div>
         </header>

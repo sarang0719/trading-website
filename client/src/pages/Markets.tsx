@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import AppShell from "@/components/AppShell";
 import Seo from "@/components/Seo";
 import { useInstruments } from "@/hooks/use-instruments";
+import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -43,9 +44,11 @@ const CATEGORIES = [
 ];
 
 export default function Markets() {
+  const { toast } = useToast();
   const [q, setQ] = useState("");
   const [activeCategory, setActiveCategory] = useState("ALL");
   const instruments = useInstruments();
+  const [starred, setStarred] = useState<Record<number, boolean>>({ 1: true, 3: true, 5: true });
 
   const [ticketOpen, setTicketOpen] = useState(false);
   const [ticketInstrument, setTicketInstrument] = useState<any>(null);
@@ -404,8 +407,23 @@ export default function Markets() {
                       <p className="text-xs text-muted-foreground truncate opacity-80">{i.name}</p>
                     </div>
                     
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} className="text-muted-foreground/30 hover:text-yellow-400 transition-colors z-10 shrink-0">
-                      <Star className="w-4 h-4" />
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const isStarred = starred[i.id];
+                        setStarred((prev) => ({ ...prev, [i.id]: !isStarred }));
+                        toast({
+                          title: isStarred ? "Removed from Watchlist" : "Added to Watchlist",
+                          description: `${i.symbol} has been ${isStarred ? "removed from" : "added to"} your primary watchlist.`
+                        });
+                      }}
+                      className={cn(
+                        "transition-colors z-10 shrink-0 p-1 rounded-lg hover:bg-secondary/60",
+                        starred[i.id] ? "text-yellow-400" : "text-muted-foreground/30 hover:text-yellow-400"
+                      )}
+                    >
+                      <Star className={cn("w-4 h-4", starred[i.id] && "fill-yellow-400")} />
                     </button>
                   </div>
 

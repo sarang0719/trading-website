@@ -18,7 +18,7 @@ function fmt(n: any) {
 
 export default function Orders() {
   const { toast } = useToast();
-  const { data: trades, isLoading } = useTimeTrades();
+  const { trades, isLoading } = useTimeTrades();
   const [search, setSearch] = useState("");
 
   const list = useMemo(() => {

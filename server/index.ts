@@ -141,20 +141,7 @@ app.use((req, res, next) => {
                 const isOpen = isGlobalMarketOpen(inst.assetClass, inst.symbol);
                 let updateData: any = { isOpen, asOf: new Date() };
                 
-                // Price updates for key instruments
-                if (inst.symbol === "BTCUSDT") {
-                  updateData.price = "69563.25";
-                  updateData.sparkline = ["69563.25"];
-                } else if (inst.symbol === "XAUUSD") {
-                  updateData.price = "4791.55";
-                  updateData.sparkline = ["4791.55"];
-                } else if (inst.symbol === "USDINR") {
-                  updateData.price = "83.50";
-                  updateData.sparkline = ["83.50"];
-                } else if (inst.symbol === "USDPKR") {
-                  updateData.price = "278.40";
-                  updateData.sparkline = ["278.40"];
-                }
+                // Preserve real DB prices and let live background feeds update them
 
                 updates.push(
                   db.update(latestPrices)

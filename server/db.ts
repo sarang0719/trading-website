@@ -84,6 +84,9 @@ export async function runMigrations() {
   // Create indexes and secondary tables in parallel
   await Promise.all([
     q(`CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON sessions(expire)`),
+    q(`CREATE INDEX IF NOT EXISTS "IDX_orders_user" ON orders(user_id)`),
+    q(`CREATE INDEX IF NOT EXISTS "IDX_watchlists_user" ON watchlists(user_id)`),
+    q(`CREATE INDEX IF NOT EXISTS "IDX_portfolios_user" ON portfolios(user_id)`),
     q(`CREATE TABLE IF NOT EXISTS latest_prices (instrument_id integer NOT NULL REFERENCES instruments(id) ON DELETE CASCADE, as_of timestamp NOT NULL DEFAULT now(), price numeric(18,6) NOT NULL, change_abs numeric(18,6), change_pct numeric(9,4), is_open boolean NOT NULL DEFAULT true, sparkline numeric(18,6)[], CONSTRAINT latest_prices_instrument_unique UNIQUE(instrument_id))`),
     q(`CREATE TABLE IF NOT EXISTS watchlists (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, name varchar(64) NOT NULL, created_at timestamp NOT NULL DEFAULT now())`),
     q(`CREATE TABLE IF NOT EXISTS portfolios (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, name varchar(64) NOT NULL, base_currency varchar(8) NOT NULL DEFAULT 'USD', created_at timestamp NOT NULL DEFAULT now())`),

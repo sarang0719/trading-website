@@ -156,10 +156,12 @@ export default function Dashboard() {
 
         {/* Sidebar content */}
         <div className="space-y-6 lg:space-y-8">
-          <section className="glass rounded-[2rem] p-6">
+          <section className="glass rounded-[2rem] p-6 border border-border/50 shadow-xl hover:border-primary/20 transition-all">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Watchlists</h3>
-              <Plus className="h-4 w-4 text-muted-foreground cursor-pointer" />
+              <Link href="/app/watchlists" title="Create or manage watchlists">
+                <Plus className="h-4 w-4 text-muted-foreground cursor-pointer hover:text-primary transition-colors" />
+              </Link>
             </div>
             
             <div className="space-y-3">

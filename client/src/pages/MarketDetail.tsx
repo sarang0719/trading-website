@@ -187,6 +187,7 @@ export default function MarketDetail() {
     "bar" | "candle" | "hollow" | "line" | "stepline" | "area" | "baseline" | "columns" | "heikin"
   >("candle");
   const [activeIndicators, setActiveIndicators] = useState<string[]>([]);
+  const [activeTool, setActiveTool] = useState<string>("cursor");
   const [flashColor, setFlashColor] = useState<string | null>(null);
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -203,62 +204,23 @@ export default function MarketDetail() {
   const [tradeDuration, setTradeDuration] = useState(60); // default: 1m candle
   const [livePrice, setLivePrice] = useState<number | null>(null);
 
-  // ── Standalone Live Price Engine (keeps header price live, TradingView handles chart) ──
+  // ── Synchronized Price Engine (LiveTradingChart drives real-time ticks to ensure 100% exact match between header and chart) ──
   useEffect(() => {
     if (!instrument) return;
     let isActive = true;
-    let ws: WebSocket | null = null;
-    let poller: ReturnType<typeof setInterval> | null = null;
-    let wsRecoTimer: ReturnType<typeof setTimeout> | null = null;
-    let wsDelay = 1000;
 
-    const fetchPrice = async () => {
-      if (!isActive) return;
+    const fetchInitialPrice = async () => {
       try {
         const res = await fetch(`/api/market-data/price/${instrument.symbol}`);
         if (res.ok) {
           const d = await res.json();
-          if (d.price && isActive) setLivePrice(parseFloat(d.price));
+          if (d.price && isActive && livePrice === null) setLivePrice(parseFloat(d.price));
         }
       } catch {}
     };
+    fetchInitialPrice();
 
-    if (instrument.exchange === "BINANCE" && instrument.symbol !== "XAUUSD") {
-      // ── Binance WebSocket for crypto (instant tick) ──────────────────────
-      const connectWS = () => {
-        if (!isActive) return;
-        const sym = instrument.symbol.toLowerCase();
-        ws = new WebSocket(`wss://stream.binance.com:9443/ws/${sym}@miniTicker`);
-        ws.onopen  = () => { wsDelay = 1000; };
-        ws.onmessage = (e) => {
-          if (!isActive) return;
-          try {
-            const m = JSON.parse(e.data);
-            if (m.c) setLivePrice(parseFloat(m.c));
-          } catch {}
-        };
-        ws.onclose = () => {
-          if (!isActive) return;
-          wsRecoTimer = setTimeout(() => {
-            wsDelay = Math.min(wsDelay * 2, 30000);
-            connectWS();
-          }, wsDelay);
-        };
-        ws.onerror = () => { try { ws?.close(); } catch {} };
-      };
-      connectWS();
-    } else {
-      // ── REST polling for Gold, Silver, Forex (every 2s) ──────────────────
-      fetchPrice(); // immediate first fetch
-      poller = setInterval(fetchPrice, 2000);
-    }
-
-    return () => {
-      isActive = false;
-      if (wsRecoTimer) clearTimeout(wsRecoTimer);
-      if (poller)      clearInterval(poller);
-      if (ws) { ws.onclose = null; try { ws.close(); } catch {} }
-    };
+    return () => { isActive = false; };
   }, [instrument?.symbol, instrument?.exchange]);
 
   // Custom Candle Detail Hover states
@@ -432,8 +394,7 @@ export default function MarketDetail() {
       if (candlesRef.current?.length >= 52) {
         try {
           const { predictNextCandle } = await import("@/lib/candle-predictor");
-          const closed = candlesRef.current.slice(0, -1);
-          const pred = predictNextCandle(closed, 60);
+          const pred = predictNextCandle(candlesRef.current, 60);
           if (pred) {
             setPrediction(pred);
             setAiSignal(pred.direction);
@@ -465,9 +426,7 @@ export default function MarketDetail() {
       try {
         const { predictNextCandle } = await import("@/lib/candle-predictor");
         // Need at least 52 candles: 50 for warmup + 1 live tick + 1 safety
-        if (!candles || candles.length < 52) return;
-        const closed = candles.slice(0, -1);
-        const pred = predictNextCandle(closed, candleSecs);
+        const pred = predictNextCandle(candles, candleSecs);
         if (pred) {
           setPrediction(pred);
           setAiSignal(pred.direction);
@@ -994,7 +953,7 @@ export default function MarketDetail() {
         const connectWS = () => {
           if (!isActive) return;
           try {
-            if (instrument.exchange === "BINANCE" && instrument.symbol !== "XAUUSD") {
+            if (instrument.exchange === "BINANCE" || instrument.symbol === "XAUUSD") {
               // ── Binance kline stream (Crypto + Gold via PAXGUSDT) ──────────
               const wsSymbol = instrument.symbol === "XAUUSD" ? "paxgusdt" : instrument.symbol.toLowerCase();
               ws = new WebSocket(`wss://stream.binance.com:9443/ws/${wsSymbol}@kline_${interval}`);
@@ -1129,8 +1088,8 @@ export default function MarketDetail() {
 
     loadData();
 
-    // ── Step 8: Polling for XAUUSD (Yahoo Finance spot gold) + non-WS markets ───
-    if (isActive && instrument?.exchange !== "BINANCE") {
+    // ── Step 8: Polling for non-WS markets ───
+    if (isActive && instrument?.exchange !== "BINANCE" && instrument?.symbol !== "XAUUSD") {
       const fetchRealPrice = async () => {
         if (!isActive || !chartRef.current) return;
         try {
@@ -1211,13 +1170,31 @@ export default function MarketDetail() {
 
         {/* ── LEFT VERTICAL TOOLBAR ── */}
         <div className="hidden lg:flex w-11 flex-col items-center pt-3 pb-3 gap-4 bg-card/40 border-r border-border/40 shrink-0">
-          <MousePointer2 className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
-          <Crosshair     className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
+          <MousePointer2
+            onClick={() => { setActiveTool("cursor"); toast({ title: "Tool: Cursor", description: "Standard chart selection mode." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer transition-colors p-0.5 rounded", activeTool === "cursor" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
+          <Crosshair
+            onClick={() => { setActiveTool("crosshair"); toast({ title: "Tool: Crosshair", description: "Precise price and time coordinates enabled." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer transition-colors p-0.5 rounded", activeTool === "crosshair" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
           <div className="h-px w-6 bg-border/50" />
-          <Minus   className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer -rotate-45 transition-colors" />
-          <Pencil  className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
-          <Type    className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
-          <Square  className="w-[18px] h-[18px] text-muted-foreground hover:text-foreground cursor-pointer transition-colors" />
+          <Minus
+            onClick={() => { setActiveTool("trendline"); toast({ title: "Tool: Trendline", description: "Click and drag on chart to draw trendline." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer -rotate-45 transition-colors p-0.5 rounded", activeTool === "trendline" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
+          <Pencil
+            onClick={() => { setActiveTool("brush"); toast({ title: "Tool: Brush", description: "Freehand drawing mode activated." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer transition-colors p-0.5 rounded", activeTool === "brush" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
+          <Type
+            onClick={() => { setActiveTool("text"); toast({ title: "Tool: Text Note", description: "Click anywhere on chart to add annotation." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer transition-colors p-0.5 rounded", activeTool === "text" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
+          <Square
+            onClick={() => { setActiveTool("rectangle"); toast({ title: "Tool: Zone Box", description: "Click and drag to highlight support/resistance zone." }); }}
+            className={cn("w-[18px] h-[18px] cursor-pointer transition-colors p-0.5 rounded", activeTool === "rectangle" ? "text-primary bg-primary/10 shadow-[0_0_8px_rgba(41,98,255,0.3)]" : "text-muted-foreground hover:text-foreground")}
+          />
         </div>
 
         {/* ── CENTER: CHART COLUMN ── */}
@@ -1339,8 +1316,7 @@ export default function MarketDetail() {
             </div>
           </div>
 
-
-          {/* ── Live Chart — Custom Engine (Quotex-style, no TV embed) ── */}
+          {/* ── Live Chart — Custom Engine (Quotex exact candles & prices) ── */}
           <div className="flex-1 min-h-0 w-full relative">
             <LiveTradingChart
               symbol={instrument.symbol}
@@ -1410,34 +1386,27 @@ export default function MarketDetail() {
           </div>
         </div>
 
-        {/* ── QUOTEX STYLE RIGHT SIDEBAR (Desktop) ── */}
+        {/* ── RIGHT SIDEBAR (Institutional UI + AI Predictor) ── */}
         <div className="hidden lg:flex lg:w-[300px] xl:w-[320px] shrink-0 flex-col border-l border-border/40 bg-card lg:h-full">
           {/* TOP ZONE: scrollable section containing all controls */}
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
 
-
           {/* AI COPILOT SECTION v18.0 LIGHTNING VISUALS */}
           <div className="p-4 border-b border-border/20 bg-primary/5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> AI Status</h3>
+              <h3 className="text-[11px] font-bold text-primary uppercase flex items-center gap-1.5"><BrainCircuit className="w-4 h-4"/> Auto-Invest Status</h3>
                 <div className="flex items-center gap-1.5">
                     <span className={cn(
                       "text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider transition-all duration-300",
-                      aiSignal === "BUY" ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]" :
-                      aiSignal === "SELL" ? "bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_8px_rgba(251,113,133,0.2)]" :
-                      "bg-primary/20 text-primary border border-primary/30"
+                      autoTradeActive ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_0_8px_rgba(52,211,153,0.2)]" : "bg-white/10 text-muted-foreground border border-white/10"
                     )}>
-                      {prediction?.strength === "STRONG" ? `STRONG ${aiSignal}` : 
-                       aiSignal === "BUY" ? "BULLISH BIAS" : 
-                       aiSignal === "SELL" ? "BEARISH BIAS" : 
-                       "MONITORING"}
+                      {autoTradeActive ? "ACTIVE" : "READY"}
                     </span>
-                    <span className="text-[10px] font-black font-mono text-white/50">{aiConfidence}%</span>
                 </div>
              </div>
              
              <p className="text-[11px] text-muted-foreground mb-4 leading-relaxed">
-               Proprietary QUANTEDGE V12.1 · SMC algorithms are currently analyzing real-time order flow and multi-timeframe liquidity zones.
+               Automated institutional execution engine. When enabled, trades execute automatically based on confirmed SMC liquidity zones.
              </p>
             <div className={cn("flex items-center justify-between border p-2 rounded-lg transition-colors", 
               isAdmin 
@@ -1765,12 +1734,13 @@ export default function MarketDetail() {
       {/* ── AI BOT POPUP (bottom-right floating) ── */}
       <div className="fixed bottom-6 right-8 flex flex-col items-end gap-3 z-50">
         {showAiBotPopup && (
-          <div className="bg-background border border-primary/30 p-5 rounded-2xl shadow-2xl max-w-[320px] mb-2 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5">
+          <div className="bg-background border border-primary/30 p-5 rounded-2xl shadow-2xl max-w-[340px] mb-2 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/10">
               <div className="flex items-center gap-2">
-                <BrainCircuit className="w-4 h-4 text-primary" />
+                <BrainCircuit className="w-4 h-4 animate-pulse text-primary" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-primary">QUANTEDGE V12.1 · SMC</span>
               </div>
+              <span className="text-[8px] font-mono bg-primary/20 text-primary px-1.5 py-0.5 rounded uppercase font-bold">Next Candle</span>
               <button onClick={() => setShowAiBotPopup(false)} className="text-muted-foreground hover:text-white"><Plus className="w-4 h-4 rotate-45" /></button>
             </div>
 
@@ -1779,63 +1749,67 @@ export default function MarketDetail() {
               const sig    = prediction ? (prediction.action !== "MONITORING" ? prediction.action : aiSignal) : aiSignal;
               const conf   = prediction?.probability ?? aiConfidence;
               const score  = (prediction as any)?.confluenceScore ?? "—";
-              const btWR   = (prediction as any)?.backtestWinRate ?? 61.1;
               const msg    = prediction?.message ?? "QUANTEDGE V12.1 · SMC — Walk-Forward Optimized Smart Money Engine.";
-              const label  = prediction?.strength === "STRONG" ? "⚡ STRONG Signal" : prediction?.strength === "NORMAL" ? "✅ Entry Signal" : "⏳ Monitoring";
               const ob     = (prediction as any)?.orderBlock;
               const fvg    = (prediction as any)?.fvg;
               const bos    = (prediction as any)?.bos;
               const macdOk = msg?.includes("MACD confirmed");
               return (
                 <div className="space-y-3">
+                  {/* Target Timeframe Indicator */}
+                  <div className="bg-white/5 border border-white/10 p-2 rounded-xl flex items-center justify-between">
+                    <span className="text-[9px] font-bold text-muted-foreground uppercase">Target Forecast</span>
+                    <span className="text-[10px] font-black font-mono text-white flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" /> Upcoming 1m Candle
+                    </span>
+                  </div>
+
+                  {/* Main Prediction Box */}
                   <div className={cn(
-                    "flex items-center gap-3 p-3 rounded-xl border",
-                    isBuy ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                    "flex flex-col items-center justify-center p-3.5 rounded-xl border text-center shadow-lg transition-all",
+                    isBuy ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]" : "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
                   )}>
-                    {isBuy ? <TrendingUp className="w-9 h-9" /> : <TrendingDown className="w-9 h-9" />}
-                    <div className="flex-1">
-                      <div className="text-3xl font-black tracking-tighter leading-none">{sig}</div>
-                      <div className="text-[10px] uppercase font-bold tracking-widest mt-0.5 opacity-80">{label}</div>
+                    <span className="text-[9px] uppercase font-black tracking-widest opacity-80 mb-1">PREDICTED DIRECTION</span>
+                    <div className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
+                      {isBuy ? "🚀 CALL / UP (GREEN)" : "🔻 PUT / DOWN (RED)"}
                     </div>
-                    {score !== "—" && (
-                      <div className="text-right">
-                        <div className="text-xl font-black">{score}<span className="text-xs opacity-50">/15</span></div>
-                        <div className="text-[9px] uppercase opacity-50">Score</div>
-                      </div>
-                    )}
+                    <span className="text-[10px] font-mono mt-1 font-bold text-white/90">
+                      Confirmed Win Probability: {conf}%
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2 text-center">
-                      <div className="text-emerald-400 font-black text-lg leading-none">{btWR}%</div>
-                      <div className="text-[9px] text-muted-foreground uppercase mt-0.5">Backtested WR</div>
+                  {/* Probability Progress Bar */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[9px] font-bold uppercase">
+                      <span className="text-muted-foreground">Confidence Level</span>
+                      <span className={cn(conf >= 85 ? "text-emerald-400" : "text-amber-400")}>{conf}% CONFIRMED</span>
                     </div>
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-2 text-center">
-                      <div className={cn("font-black text-lg leading-none", conf > 70 ? "text-emerald-400" : "text-yellow-400")}>{conf}%</div>
-                      <div className="text-[9px] text-muted-foreground uppercase mt-0.5">AI Confidence</div>
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-0.5 border border-white/5">
+                      <div className={cn("h-full transition-all duration-700 rounded-full", isBuy ? "bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]")} style={{ width: `${conf}%` }} />
                     </div>
                   </div>
 
-                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                    <div className={cn("h-full transition-all duration-700", conf > 70 ? "bg-emerald-500" : "bg-yellow-500")} style={{ width: `${conf}%` }} />
-                  </div>
-
-                  <div className="grid grid-cols-4 gap-1">
-                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", ob ? "bg-primary/20 text-primary" : "bg-white/5 text-muted-foreground")}>
+                  {/* SMC Confluence Grid */}
+                  <div className="grid grid-cols-4 gap-1 pt-1">
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", ob ? "bg-primary/20 text-primary border border-primary/30" : "bg-white/5 text-muted-foreground")}>
                       {ob ? `${ob.type} OB` : "No OB"}
                     </div>
-                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", fvg ? "bg-violet-500/20 text-violet-400" : "bg-white/5 text-muted-foreground")}>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", fvg ? "bg-violet-500/20 text-violet-400 border border-violet-500/30" : "bg-white/5 text-muted-foreground")}>
                       {fvg ? `${(fvg as any).type} FVG` : "No FVG"}
                     </div>
-                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", bos ? "bg-blue-500/20 text-blue-400" : "bg-white/5 text-muted-foreground")}>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", bos ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-white/5 text-muted-foreground")}>
                       {bos ? `BOS ${bos}` : "No BOS"}
                     </div>
-                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", macdOk ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/10 text-amber-500/70")}>
+                    <div className={cn("text-center p-1.5 rounded-lg text-[8px] font-bold uppercase", macdOk ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-amber-500/10 text-amber-500/70")}>
                       {macdOk ? "MACD ✅" : "MACD ⏳"}
                     </div>
                   </div>
 
-                  <p className="text-[10px] text-slate-400 leading-relaxed">{msg}</p>
+                  {/* Institutional Reasoning */}
+                  <div className="bg-muted/40 p-2.5 rounded-xl border border-border/10 font-mono">
+                    <span className="text-[8px] uppercase font-bold text-primary block mb-1">⚡ Smart Money Reasoning:</span>
+                    <p className="text-[10px] text-slate-300 leading-relaxed">{msg}</p>
+                  </div>
                 </div>
               );
             })()}

@@ -16,7 +16,7 @@
  *   Candle end:  freeze, create new
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   createChart,
   ColorType,
@@ -160,7 +160,7 @@ const fmtPrice = (v: number, sym: string): string => {
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function LiveTradingChart({
+function LiveTradingChartComponent({
   symbol, exchange, assetClass, timeframe, onPriceUpdate, priceLevels = [], activeIndicators = [],
 }: LiveTradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -277,8 +277,12 @@ export default function LiveTradingChart({
     const prev = prevPriceRef.current;
     if (prev > 0 && Math.abs(rawPrice - prev) / prev > 0.08) return; // 8% spike guard
 
-    targetPriceRef.current = rawPrice;
-    lastTickRef.current    = Date.now();
+    targetPriceRef.current  = rawPrice;
+    currentPriceRef.current = rawPrice;
+    lastTickRef.current     = Date.now();
+
+    updateCandleRef.current(rawPrice);
+    setDisplayPrice(rawPrice);
 
     const dir: "up"|"down"|null = prev > 0 ? (rawPrice > prev ? "up" : rawPrice < prev ? "down" : null) : null;
     if (dir) { setPriceDir(dir); setFlashKey(k => k + 1); }
@@ -301,56 +305,64 @@ export default function LiveTradingChart({
     candleSecsRef.current = TF_SECS[timeframe] ?? 60;
 
     // ── 1. Create lightweight chart ──────────────────────────────────────────
+    // ── 1. Create lightweight chart (Quotex exact design) ───────────────────
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
-        textColor:  "rgba(209,213,219,0.85)",
+        background: { type: ColorType.Solid, color: "#131722" },
+        textColor:  "#8c9baa",
         fontSize:   11,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(255,255,255,0.02)", style: 0 }, // 0 is Solid faint lines
-        horzLines: { color: "rgba(255,255,255,0.02)", style: 0 },
+        vertLines: { color: "rgba(255,255,255,0.03)", style: 0 },
+        horzLines: { color: "rgba(255,255,255,0.03)", style: 0 },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#1e2433", style: 2 }, // Dashed crosshair
-        horzLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#1e2433", style: 2 },
+        vertLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#1e222d", style: 2 },
+        horzLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#1e222d", style: 2 },
       },
       rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.06)",
+        borderColor: "rgba(255,255,255,0.08)",
         autoScale:   true,
         scaleMargins: { top: 0.06, bottom: 0.12 },
       },
       timeScale: {
-        borderColor:    "rgba(255,255,255,0.06)",
+        borderColor:    "rgba(255,255,255,0.08)",
         timeVisible:    true,
         secondsVisible: false,
-        rightOffset:    16,
-        barSpacing:     14, // Thicker candles to match standard sites
-        minBarSpacing:  2,
+        rightOffset:    20,
+        barSpacing:     14, // Thicker candles exactly like Quotex
+        minBarSpacing:  3,
       },
       autoSize: true,
     });
 
-    // ── 2. Add series ────────────────────────────────────────────────────────
+    // ── 2. Add Candlestick Series (Exact Quotex Neon Green & Red) ───────────
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor:         "#0ecb81", // Vibrant standard Green
-      downColor:       "#f6465d", // Vibrant standard Red
-      borderVisible:   false,     // Clean borderless design
-      wickUpColor:     "#0ecb81",
-      wickDownColor:   "#f6465d",
+      upColor:         "#00e676", // Quotex pure bullish green
+      downColor:       "#ff5252", // Quotex pure bearish red
+      borderVisible:   true,
+      borderUpColor:   "#00e676",
+      borderDownColor: "#ff5252",
+      wickUpColor:     "#00e676",
+      wickDownColor:   "#ff5252",
       wickVisible:     true,
+      priceLineVisible: true,
+      priceLineColor:  "#2962ff",
+      priceLineWidth:  1,
+      priceLineStyle:  2, // Dashed line exactly right across the chart
     });
 
-    // (Volume series completely removed for pure Quotex binary look)
+    // (Only add line series for non-candle charts; hide when showing candlesticks so chart is crystal clean)
     const liveLine = chart.addSeries(LineSeries, {
-      color:          "rgba(255,255,255,0.5)",
+      color:          "rgba(255,255,255,0)",
       lineWidth:      1,
       lineStyle:      3,
       crosshairMarkerVisible: false,
       lastValueVisible: false,
       priceLineVisible: false,
+      visible:        false,
     });
     
     // ── 3. Initialize Indicators Panes ───────────────────────────────────────
@@ -464,16 +476,11 @@ export default function LiveTradingChart({
       const loop = () => {
         if (!isActive) return;
 
-        const target      = targetPriceRef.current;
-        const current     = currentPriceRef.current;
-        const msSinceTick = Date.now() - lastTickRef.current;
-
-        if (target > 0) {
-          if (msSinceTick < 1200) {
-            currentPriceRef.current += (target - current) * 0.08;
-          }
-          const p = currentPriceRef.current;
-          if (p > 0) { updateCandleRef.current(p); setDisplayPrice(p); }
+        const nowSec     = Math.floor(Date.now() / 1000);
+        const candleSecs = candleSecsRef.current;
+        if (candleSecs > 0) {
+          const remaining = candleSecs - (nowSec % candleSecs);
+          setCountdown(remaining);
         }
 
         animFrame = requestAnimationFrame(loop);
@@ -496,7 +503,23 @@ export default function LiveTradingChart({
           try {
             const msg = JSON.parse(ev.data);
             if (msg.e === "kline" && msg.k) {
-              onTickRef.current(parseFloat(msg.k.c));
+              const k = msg.k;
+              const time = Math.floor(k.t / 1000) as UTCTimestamp;
+              const open = parseFloat(k.o);
+              const high = parseFloat(k.h);
+              const low  = parseFloat(k.l);
+              const close = parseFloat(k.c);
+              const volume = parseFloat(k.v || "0");
+              
+              if (candleRef.current && close > 0) {
+                try {
+                  candleRef.current.update({ time, open, high, low, close });
+                  liveLineRef.current?.update({ time, value: close });
+                } catch {}
+                liveCandle.current = { time, open, high, low, close, volume };
+                setOhlcInfo({ o: open, h: high, l: low, c: close, v: volume });
+              }
+              onTickRef.current(close);
             }
           } catch {}
         };
@@ -598,45 +621,41 @@ export default function LiveTradingChart({
     return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   };
 
-  const priceColor = priceDir === "up" ? "#26a69a" : priceDir === "down" ? "#ef5350" : "#e5e7eb";
+  const priceColor = priceDir === "up" ? "#00e676" : priceDir === "down" ? "#ff5252" : "#e5e7eb";
   const isUp = ohlcInfo.c >= ohlcInfo.o;
 
   return (
-    <div className="relative w-full h-full flex flex-col bg-transparent overflow-hidden">
+    <div className="relative w-full h-full flex flex-col bg-[#131722] overflow-hidden rounded-xl border border-white/5">
 
-      {/* ── OHLC Info Strip ─────────────────────────────────────────────── */}
+      {/* ── OHLC Info Strip (Quotex style) ──────────────────────────────── */}
       {ohlcInfo.o > 0 && (
-        <div className="absolute top-2 left-3 z-20 flex items-center gap-3 text-[11px] font-mono pointer-events-none select-none">
-          <span className="text-gray-400">O</span>
-          <span className={isUp ? "text-[#26a69a]" : "text-[#ef5350]"}>{fmtPrice(ohlcInfo.o, symbol)}</span>
-          <span className="text-gray-400">H</span>
-          <span className="text-[#26a69a]">{fmtPrice(ohlcInfo.h, symbol)}</span>
-          <span className="text-gray-400">L</span>
-          <span className="text-[#ef5350]">{fmtPrice(ohlcInfo.l, symbol)}</span>
-          <span className="text-gray-400">C</span>
-          <span style={{ color: priceColor }}>{fmtPrice(ohlcInfo.c, symbol)}</span>
+        <div className="absolute top-2.5 left-4 z-20 flex items-center gap-3.5 text-[11px] font-mono pointer-events-none select-none bg-[#181c25]/90 px-3 py-1 rounded-md border border-white/5 backdrop-blur-sm">
+          <span className="text-gray-400">O: <span className={isUp ? "text-[#00e676] font-bold" : "text-[#ff5252] font-bold"}>{fmtPrice(ohlcInfo.o, symbol)}</span></span>
+          <span className="text-gray-400">H: <span className="text-[#00e676] font-bold">{fmtPrice(ohlcInfo.h, symbol)}</span></span>
+          <span className="text-gray-400">L: <span className="text-[#ff5252] font-bold">{fmtPrice(ohlcInfo.l, symbol)}</span></span>
+          <span className="text-gray-400">C: <span style={{ color: priceColor }} className="font-bold">{fmtPrice(ohlcInfo.c, symbol)}</span></span>
         </div>
       )}
 
       {/* ── Live price badge ─────────────────────────────────────────────── */}
-      <div className="absolute top-2 right-3 z-20 flex items-center gap-2 pointer-events-none">
+      <div className="absolute top-2.5 right-4 z-20 flex items-center gap-2 pointer-events-none">
         {isConnected && (
-          <div className="flex items-center gap-1.5 bg-[#0d1117]/80 border border-[#26a69a]/30 rounded-full px-2.5 py-0.5">
+          <div className="flex items-center gap-1.5 bg-[#00e676]/10 border border-[#00e676]/40 rounded-full px-2.5 py-0.5 backdrop-blur-sm">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#26a69a] opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#26a69a]" />
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#00e676] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00e676]" />
             </span>
-            <span className="text-[10px] text-[#26a69a] font-semibold tracking-wider">LIVE</span>
+            <span className="text-[10px] text-[#00e676] font-extrabold tracking-wider">LIVE DATA</span>
           </div>
         )}
       </div>
 
       {/* ── Loading overlay ──────────────────────────────────────────────── */}
       {isLoading && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#0b1120]/80 backdrop-blur-sm">
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-[#131722]/90 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-[#26a69a]/30 border-t-[#26a69a] rounded-full animate-spin" />
-            <span className="text-[12px] text-gray-400 font-medium">Loading chart data…</span>
+            <div className="w-8 h-8 border-2 border-[#00e676]/30 border-t-[#00e676] rounded-full animate-spin" />
+            <span className="text-[12px] text-gray-300 font-medium tracking-wide">Loading real-time institutional market data…</span>
           </div>
         </div>
       )}
@@ -654,20 +673,20 @@ export default function LiveTradingChart({
         className="absolute inset-0 pointer-events-none z-10 opacity-0 animate-price-flash"
         style={{
           background: priceDir === "up"
-            ? "radial-gradient(ellipse at 80% 50%, rgba(38,166,154,0.07) 0%, transparent 70%)"
+            ? "radial-gradient(ellipse at 80% 50%, rgba(0,230,118,0.08) 0%, transparent 70%)"
             : priceDir === "down"
-              ? "radial-gradient(ellipse at 80% 50%, rgba(239,83,80,0.07) 0%, transparent 70%)"
+              ? "radial-gradient(ellipse at 80% 50%, rgba(255,82,82,0.08) 0%, transparent 70%)"
               : "transparent"
         }}
       />
 
-      {/* ── Candle countdown timer ───────────────────────────────────────── */}
+      {/* ── Candle countdown timer right on the price scale level ────────── */}
       {countdown > 0 && !isLoading && (
-        <div className="absolute bottom-8 right-3 z-20 pointer-events-none">
-          <div className="flex items-center gap-1.5 bg-[#0d1117]/80 border border-white/10 rounded px-2 py-0.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#26a69a] animate-pulse" />
-            <span className="text-[10px] font-mono text-gray-300 tabular-nums">
-              Candle: {fmtCountdown(countdown)}
+        <div className="absolute bottom-6 right-3 z-20 pointer-events-none">
+          <div className="flex items-center gap-2 bg-[#1e222d] border border-[#2962ff]/60 rounded-md px-2.5 py-1 shadow-[0_4px_12px_rgba(0,0,0,0.6)]">
+            <div className="w-1.5 h-1.5 rounded-full bg-[#2962ff] animate-ping" />
+            <span className="text-[11px] font-mono font-black text-white tabular-nums tracking-wider">
+              {fmtCountdown(countdown)}
             </span>
           </div>
         </div>
@@ -681,8 +700,9 @@ export default function LiveTradingChart({
         }
         .animate-price-flash {
           animation: price-flash 0.6s ease-out forwards;
-        }
       `}</style>
     </div>
   );
 }
+
+export default React.memo(LiveTradingChartComponent);
