@@ -908,66 +908,25 @@ export default function MarketDetail() {
       else if (u === "M") candleSecs = v * 2592000;
     }
 
-    // High-speed real-time evaluation engine (locked on closed candles for 100% stability)
-    const predInterval = setInterval(() => {
-      if (!candlesRef.current || candlesRef.current.length < 5) return;
-      const closedCandles = candlesRef.current.length > 1 ? candlesRef.current.slice(0, -1) : candlesRef.current;
-      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, instrument?.symbol || "BTCUSD");
-      if (instantPred) {
-        setPrediction(instantPred);
-        setAiSignal(instantPred.direction);
-        setAiConfidence(instantPred.probability);
-      }
-    }, 2000);
-
     const runPredictor = async (candles: any[]) => {
-      if (candles.length < 5) return;
+      if (!candles || candles.length < 5) return;
       const closedCandles = candles.length > 1 ? candles.slice(0, -1) : candles;
-      
-      // 1) Instant Zero-Lag Calculation on Closed Candle History (< 2ms)
-      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, instrument?.symbol || "BTCUSD");
-      if (instantPred) {
-        setPrediction(instantPred);
-        setAiSignal(instantPred.direction);
-        setAiConfidence(instantPred.probability);
-      }
-      
-      // 2) Non-blocking Async Background Sync (does not freeze UI)
-      fetch("/api/ai/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          market: instrument?.symbol || "BTCUSD",
-          timeframe: timeframe,
-          candles: closedCandles.slice(-250).map((c: any) => ({
-            timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0
-          }))
-        })
-      }).then(async (res) => {
-        if (res.ok) {
-          const aiData = await res.json();
-          if (aiData && (aiData.signal || aiData.confidence)) {
-            const validSignal = (aiData.signal && aiData.signal !== "NO TRADE") ? aiData.signal : (aiData.probability_up >= aiData.probability_down ? "BUY" : "SELL");
-            setPrediction(prev => prev ? {
-              ...prev,
-              direction: validSignal,
-              action: validSignal,
-              probability: aiData.confidence || prev.probability,
-              strength: aiData.strength || prev.strength,
-              message: `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Confidence: ${aiData.confidence || prev.probability}% | AI Reason: ${aiData.reason?.join(', ') || 'High Confluence'}`,
-            } : prev);
-          }
-        }
-      }).catch(() => {});
-      
-      const lastClosed = candles[candles.length - 2];
+      const lastClosed = closedCandles[closedCandles.length - 1];
       if (!lastClosed) return;
-      
-      // Only record to signal history log when a new candle closes
+
+      // Lock prediction to closed candle timestamp — ZERO flickering during current candle!
       if (lastClosed.time === lastClosedTimeRef.current) {
         return;
       }
       lastClosedTimeRef.current = lastClosed.time;
+
+      // Single authoritative calculation on closed candle history
+      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, instrument?.symbol || "BTCUSD");
+      if (instantPred) {
+        setPrediction(instantPred);
+        setAiSignal(instantPred.direction);
+        setAiConfidence(instantPred.probability);
+      }
 
       try {
         const nowSec = Math.floor((Date.now() + serverTimeOffsetRef.current) / 1000);
