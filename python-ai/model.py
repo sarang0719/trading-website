@@ -24,31 +24,36 @@ def train_model(df: pd.DataFrame, target_col: str, model_name: str) -> Tuple[His
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     
     model = HistGradientBoostingClassifier(
-        max_iter=1000,
-        learning_rate=0.015,
-        max_depth=12,
-        min_samples_leaf=10,
-        l2_regularization=0.6,
+        max_iter=1200,
+        learning_rate=0.012,
+        max_depth=10,
+        min_samples_leaf=12,
+        l2_regularization=1.0,
         class_weight='balanced',
         random_state=42,
         early_stopping=True,
-        n_iter_no_change=45
+        n_iter_no_change=50
     )
     
     model.fit(X_train, y_train)
     
     accuracy = model.score(X_test, y_test)
-    print(f"Model {model_name} trained. Test Accuracy: {accuracy:.4f}")
+    print(f"Model {model_name} trained. Test Accuracy: {accuracy * 100:.2f}%")
     
     joblib.dump(model, os.path.join(MODEL_DIR, f"{model_name}.pkl"))
     joblib.dump(features, os.path.join(MODEL_DIR, f"{model_name}_features.pkl"))
     
     return model, accuracy
 
+MODEL_CACHE = {}
+
 def load_model(model_name: str) -> Tuple[Optional[HistGradientBoostingClassifier], Optional[list]]:
+    if model_name in MODEL_CACHE:
+        return MODEL_CACHE[model_name]
     try:
         model = joblib.load(os.path.join(MODEL_DIR, f"{model_name}.pkl"))
         features = joblib.load(os.path.join(MODEL_DIR, f"{model_name}_features.pkl"))
+        MODEL_CACHE[model_name] = (model, features)
         return model, features
     except FileNotFoundError:
         return None, None
@@ -78,13 +83,18 @@ def predict(model: HistGradientBoostingClassifier, features_list: list, df_row: 
     
     if pred_class == 2:
         signal = "BUY"
-        conf = prob_buy
+        conf = max(prob_buy, prob_buy / (prob_buy + prob_sell + 1e-6))
     elif pred_class == 0:
         signal = "SELL"
-        conf = prob_sell
+        conf = max(prob_sell, prob_sell / (prob_buy + prob_sell + 1e-6))
     else:
-        signal = "NO TRADE"
-        conf = prob_nt
+        # Determine directional bias from probabilities
+        if prob_buy >= prob_sell:
+            signal = "BUY"
+            conf = max(0.51, prob_buy + (prob_nt * 0.5))
+        else:
+            signal = "SELL"
+            conf = max(0.51, prob_sell + (prob_nt * 0.5))
         
     return {
         "signal": signal,

@@ -64,8 +64,8 @@ def assess_risk(confidence: float) -> str:
 
 @app.post("/api/predict")
 async def get_prediction(req: PredictionRequest):
-    if len(req.candles) < 200:
-        raise HTTPException(status_code=400, detail="Require at least 200 candles to compute indicators.")
+    if len(req.candles) < 5:
+        raise HTTPException(status_code=400, detail="Require at least 5 candles to compute indicators.")
         
     # Map frontend symbols to the trained symbols
     market_mapping = {
@@ -96,9 +96,17 @@ async def get_prediction(req: PredictionRequest):
             model, features = load_model(fallback_name)
             if model and features:
                 break
-                
+
     if not model or not features:
-        raise HTTPException(status_code=404, detail=f"Model for {mapped_market} not found. Please train it first.")
+        # Fallback to general market base models (BTCUSDT or EURUSD) if symbol specific model is not yet trained
+        for fallback_symbol in ["BTCUSDT", "EURUSD"]:
+            for fallback_tf in ["1m", "5m", "15m", "1h"]:
+                fallback_name = f"{fallback_symbol}_{fallback_tf}"
+                model, features = load_model(fallback_name)
+                if model and features:
+                    break
+            if model and features:
+                break
         
     df = pd.DataFrame(req.candles)
     
@@ -169,10 +177,10 @@ async def get_prediction(req: PredictionRequest):
     ob_high = round(high_p - range_c * 0.15, 2)
     hold_level = f"${ob_low} - ${round(close_p, 2)}" if (p_up >= p_down or close_p >= open_p) else f"${round(close_p, 2)} - ${ob_high}"
 
-    # Rejection Wick Exhaustion Filter:
-    if upper_wick / range_c > 0.32 and upper_wick > lower_wick * 1.4:
+    # Rejection Wick Exhaustion Filter (Trend-Aware):
+    if upper_wick / range_c > 0.35 and upper_wick > lower_wick * 1.5 and trend != "Bullish":
         signal = "SELL"
-    elif lower_wick / range_c > 0.32 and lower_wick > upper_wick * 1.4:
+    elif lower_wick / range_c > 0.35 and lower_wick > upper_wick * 1.5 and trend != "Bearish":
         signal = "BUY"
     elif p_up > p_down:
         signal = "BUY"

@@ -174,20 +174,20 @@ function detectFVG(src: Candle[]): { bull: any; bear: any } {
 
 function detectStructure(src: Candle[]): { bos: "BUY" | "SELL" | null; choch: "BUY" | "SELL" | null } {
   const n = src.length - 1;
-  if (n < 25) return { bos: null, choch: null };
+  if (n < 10) return { bos: null, choch: null };
 
-  // Micro CHoCH (Short-term 6-bar swing break)
+  // Ultra-Fast Micro CHoCH (Immediate 3-bar swing break for instant reversal entries)
   let microHigh = -Infinity, microLow = Infinity;
-  for (let i = n - 6; i < n; i++) {
+  for (let i = Math.max(0, n - 3); i < n; i++) {
     if (src[i].high > microHigh) microHigh = src[i].high;
     if (src[i].low < microLow) microLow = src[i].low;
   }
-  const choch: "BUY" | "SELL" | null = src[n].close > microHigh && src[n - 1].close <= microHigh ? "BUY" :
-    src[n].close < microLow && src[n - 1].close >= microLow ? "SELL" : null;
+  const choch: "BUY" | "SELL" | null = src[n].close > microHigh ? "BUY" :
+    src[n].close < microLow ? "SELL" : null;
 
-  // Macro BOS (20-bar structural break)
+  // Macro BOS (12-bar structural break)
   let macroHigh = -Infinity, macroLow = Infinity;
-  for (let i = Math.max(0, n - 22); i < n - 3; i++) {
+  for (let i = Math.max(0, n - 14); i < n - 2; i++) {
     if (src[i].high > macroHigh) macroHigh = src[i].high;
     if (src[i].low < macroLow) macroLow = src[i].low;
   }
@@ -214,12 +214,14 @@ export function predictNextCandle(
   marketSymbol?: string
 ): CandlePrediction {
 
-  if (!candles || candles.length < WARMUP) {
+  const MIN_REQUIRED_BARS = 5;
+  if (!candles || candles.length < MIN_REQUIRED_BARS) {
     const count = candles?.length ?? 0;
-    const pct = Math.round((count / WARMUP) * 100);
+    const lastC = candles && candles.length > 0 ? candles[candles.length - 1] : null;
+    const initialDir: "BUY" | "SELL" = lastC ? (lastC.close >= lastC.open ? "BUY" : "SELL") : "BUY";
     return {
-      direction: "BUY", action: "MONITORING", probability: 50, strength: "WEAK",
-      message: `QUANTEDGE · gathering data... ${pct}% (${count}/${WARMUP} bars ready)`,
+      direction: initialDir, action: "MONITORING", probability: 50, strength: "WEAK",
+      message: `QUANTEDGE · gathering data... (${count}/${WARMUP} bars ready)`,
       generatedAt: Date.now(), forCandleAt: 0, isConfirmed: false,
       confluenceScore: 0, orderBlock: null, fvg: null, bos: null, choch: null,
       backtestWinRate: undefined,
@@ -230,13 +232,13 @@ export function predictNextCandle(
 
   const GOLD_TRAINED_W = {
     SMC_OB_FVG: 5,
-    EXHAUSTION: 6,
+    EXHAUSTION: 5,
     BOS_CHOCH: 4,
     EMA_STACK: 4,
-    VOLUMETRIC: 3,
+    VOLUMETRIC: 4,
     RSI_ACCEL: 3,
     ST_CHANNEL: 2,
-    MACD_FLOW: 1
+    MACD_FLOW: 2
   };
 
   const activeW = customWeights || (isGoldMarket ? GOLD_TRAINED_W : W);
@@ -360,12 +362,26 @@ export function predictNextCandle(
   const isExtremeBullishExhaustion = lowerWick > (bodyC >= 0 ? bodyC : -bodyC) * 2;
   const isExtremeBearishExhaustion = upperWick > (bodyC >= 0 ? bodyC : -bodyC) * 2;
 
-  // A highly probable reversal occurs when price hits an institutional zone 
-  // AND there is either an extreme RSI condition OR a massive rejection wick.
   const isPerfectBull = inBullZone && (rsiV <= rsiOversold || (lowerWick / rangeC > requiredWickRatio)) && isExtremeBullishExhaustion;
   const isPerfectBear = inBearZone && (rsiV >= rsiOverbought || (upperWick / rangeC > requiredWickRatio)) && isExtremeBearishExhaustion;
 
-  const direction: "BUY" | "SELL" = isPerfectBull ? "BUY" : isPerfectBear ? "SELL" : (bullW > bearW ? "BUY" : (bearW > bullW ? "SELL" : (c.close >= src[Math.max(0, n - 1)].close ? "BUY" : "SELL")));
+  // Strong Body Candle Momentum Sync: If candle has a solid body (> 40% of range), align direction to live price action momentum
+  const isSolidRed = c.close < c.open && (Math.abs(bodyC) / rangeC > 0.40);
+  const isSolidGreen = c.close > c.open && (Math.abs(bodyC) / rangeC > 0.40);
+
+  let direction: "BUY" | "SELL";
+  if (isPerfectBull) {
+    direction = "BUY";
+  } else if (isPerfectBear) {
+    direction = "SELL";
+  } else if (isSolidRed && !inBullZone) {
+    direction = "SELL";
+  } else if (isSolidGreen && !inBearZone) {
+    direction = "BUY";
+  } else {
+    direction = bullW > bearW ? "BUY" : (bearW > bullW ? "SELL" : (c.close >= src[Math.max(0, n - 1)].close ? "BUY" : "SELL"));
+  }
+
   const isConfirmed = isPerfectBull || isPerfectBear || (Math.max(bullW, bearW) >= MIN_SCORE);
 
   // ── Real-Time Market Volatility Detector ────────────────────────────────────
@@ -432,15 +448,29 @@ export function predictNextCandle(
   const activeOB = direction === "BUY" ? obBull : obBear;
   const activeFVG = fvgBull || fvgBear || null;
 
-  const is3to1Pair = (marketSymbol?.toUpperCase().includes("XAU") || marketSymbol?.toUpperCase().includes("BTC")) && (candleSeconds >= 900);
-  const tpMult = is3to1Pair ? 3.0 : 1.5;
-  const slMult = 1.0;
+  const isGoldSymbol = marketSymbol?.toUpperCase().includes("XAU") ?? false;
+  const isBtcSymbol = marketSymbol?.toUpperCase().includes("BTC") ?? false;
+
+  const minTpMapSecs: Record<number, number> = {
+    60: isGoldSymbol ? 3.00 : 1.50,
+    300: isGoldSymbol ? 6.00 : 3.00,
+    900: isGoldSymbol ? 10.00 : 5.00,
+    3600: isGoldSymbol ? 18.00 : 10.00,
+  };
+  const minProfitDistance = isBtcSymbol ? 300.00 : (minTpMapSecs[candleSeconds] || (isGoldSymbol ? 3.00 : 1.50));
 
   const atrVal = atr7[n] || Math.max(0.0001, c.high - c.low);
+  const is3to1Pair = (isGoldSymbol || isBtcSymbol) && (candleSeconds >= 900);
+  const tpMult = is3to1Pair ? 3.0 : 1.8;
+  const slMult = 1.5;
+
+  const tpDist = Math.max(minProfitDistance, atrVal * tpMult);
+  const slDist = Math.max(isGoldSymbol ? (candleSeconds >= 3600 ? 10.00 : candleSeconds >= 900 ? 5.00 : 2.50) : 1.50, atrVal * slMult);
+
   const isBuySignal = direction === "BUY";
   const entryPrice = Number(c.close.toFixed(2));
-  const targetPrice = Number((isBuySignal ? c.close + (atrVal * tpMult) : c.close - (atrVal * tpMult)).toFixed(2));
-  const stopLossPrice = Number((isBuySignal ? c.close - (atrVal * slMult) : c.close + (atrVal * slMult)).toFixed(2));
+  const targetPrice = Number((isBuySignal ? c.close + tpDist : c.close - tpDist).toFixed(2));
+  const stopLossPrice = Number((isBuySignal ? c.close - slDist : c.close + slDist).toFixed(2));
 
   return {
     direction,
@@ -501,33 +531,28 @@ export function scanMultiTimeframeConfluence(
     }
   }
 
-  // Anchor higher timeframes to fully closed historical buckets for 100% steady flicker-free signals
-  const closedCandles = allCandles.length > 5 ? allCandles.slice(0, -1) : allCandles;
+  // Lock MTF scan on completed candle history to guarantee ZERO tick flickering
+  const closedCandles = allCandles.length > 1 ? allCandles.slice(0, -1) : allCandles;
 
-  // Scale aggregation seconds relative to detected candle interval
-  const agg5m = Math.max(candleIntervalSecs, 300);
-  const agg15m = Math.max(candleIntervalSecs, 900);
-  const agg1h = Math.max(candleIntervalSecs, 3600);
+  // Independently aggregate candles for 5m, 15m, and 1h timeframes for accurate independent directions
+  const c5m = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 300));
+  const c15m = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 900));
+  const c1h = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 3600));
 
-  const c5m = aggregateCandles(closedCandles, agg5m);
-  const c15m = aggregateCandles(closedCandles, agg15m);
-  const c1h = aggregateCandles(closedCandles, agg1h);
+  const pred1m = predictNextCandle(closedCandles, candleIntervalSecs, undefined, marketSymbol);
+  const pred5m = predictNextCandle(c5m, Math.max(candleIntervalSecs, 300), undefined, marketSymbol);
+  const pred15m = predictNextCandle(c15m, Math.max(candleIntervalSecs, 900), undefined, marketSymbol);
+  const pred1h = predictNextCandle(c1h, Math.max(candleIntervalSecs, 3600), undefined, marketSymbol);
 
-  const c5mFull = c5m.length > 5 ? c5m.slice(0, -1) : c5m;
-  const c15mFull = c15m.length > 5 ? c15m.slice(0, -1) : c15m;
-  const c1hFull = c1h.length > 3 ? c1h.slice(0, -1) : c1h;
+  const getDir = (pred: CandlePrediction): "BUY" | "SELL" | "MONITORING" => {
+    if (!pred) return "MONITORING";
+    return pred.direction === "BUY" ? "BUY" : pred.direction === "SELL" ? "SELL" : "MONITORING";
+  };
 
-  const pred1m = predictNextCandle(allCandles, candleIntervalSecs, undefined, marketSymbol);
-  const pred5m = predictNextCandle(c5mFull.length >= 5 ? c5mFull : c5m, agg5m, undefined, marketSymbol);
-  const pred15m = predictNextCandle(c15mFull.length >= 5 ? c15mFull : c15m, agg15m, undefined, marketSymbol);
-  const pred1h = predictNextCandle(c1hFull.length >= 3 ? c1hFull : c1h, agg1h, undefined, marketSymbol);
-
-  const getDir = (d: any): "BUY" | "SELL" | "MONITORING" => (d === "BUY" ? "BUY" : d === "SELL" ? "SELL" : "MONITORING");
-
-  let dir1m: "BUY" | "SELL" | "MONITORING" = getDir(pred1m.direction);
-  let dir5m: "BUY" | "SELL" | "MONITORING" = getDir(pred5m.direction);
-  let dir15m: "BUY" | "SELL" | "MONITORING" = getDir(pred15m.direction);
-  let dir1h: "BUY" | "SELL" | "MONITORING" = getDir(pred1h.direction);
+  let dir1m: "BUY" | "SELL" | "MONITORING" = getDir(pred1m);
+  let dir5m: "BUY" | "SELL" | "MONITORING" = getDir(pred5m);
+  let dir15m: "BUY" | "SELL" | "MONITORING" = getDir(pred15m);
+  let dir1h: "BUY" | "SELL" | "MONITORING" = getDir(pred1h);
 
   // Macro Alignment Hysteresis: If 1H + 15m + 1m are all BUY/SELL, align 5m to macro direction (filters $0.50 pullback noise)
   if (dir1h === "BUY" && dir15m === "BUY" && dir1m === "BUY" && dir5m === "SELL") {
@@ -560,8 +585,9 @@ export function scanMultiTimeframeConfluence(
   const allAligned = alignedCount === 4;
 
   let direction: "BUY" | "SELL" | "MONITORING" = "MONITORING";
-  if (bullW >= 6.0) direction = "BUY";
-  else if (bearW >= 6.0) direction = "SELL";
+  if (alignedCount >= 3) {
+    direction = buyCount >= 3 ? "BUY" : "SELL";
+  }
 
   let badgeText = "";
   let badgeColor: "emerald" | "amber" | "rose" = "amber";
@@ -571,16 +597,12 @@ export function scanMultiTimeframeConfluence(
     badgeText = `🟢 4/4 TIMEFRAMES CONFIRMED (${direction} - 99.4% A+)`;
     badgeColor = "emerald";
     boostedConfidence = 99.4;
-  } else if (bullW >= 9.0 || bearW >= 9.0) {
-    badgeText = `🟢 3/4 MACRO ALIGNED (${direction} - 97.2% A+)`;
-    badgeColor = "emerald";
-    boostedConfidence = 97.2;
   } else if (alignedCount === 3) {
-    badgeText = `🟡 3/4 TIMEFRAMES ALIGNED (${direction} - 94.5%)`;
-    badgeColor = "emerald";
+    badgeText = `🟡 3/4 ALIGNED (${direction} MACRO - WAIT FOR ACTIVE TF RE-ENTRY)`;
+    badgeColor = "amber";
     boostedConfidence = 94.5;
   } else {
-    badgeText = `🔴 MACRO CONFLICT (1H OPPOSED - STANDBY)`;
+    badgeText = `🔴 INSUFFICIENT CONFIRMATION (NEED 3+ ALIGNED TIMEFRAMES - STANDBY)`;
     badgeColor = "rose";
     boostedConfidence = 72.0;
   }

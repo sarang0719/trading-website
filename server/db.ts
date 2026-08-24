@@ -72,6 +72,7 @@ export async function runMigrations() {
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trade_mode') THEN CREATE TYPE trade_mode AS ENUM ('DEMO','REAL'); END IF; END $$`),
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'transaction_type') THEN CREATE TYPE transaction_type AS ENUM ('DEPOSIT', 'WITHDRAW', 'TRADE_DEDUCTION', 'TRADE_WIN', 'TRADE_REFUND', 'DEMO_RESET', 'COMMISSION'); END IF; END $$`),
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'transaction_status') THEN CREATE TYPE transaction_status AS ENUM ('PENDING', 'SUCCESS', 'FAILED'); END IF; END $$`),
+    q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'withdrawal_status') THEN CREATE TYPE withdrawal_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'); END IF; END $$`),
   ]);
 
   // Create core tables in parallel
@@ -101,6 +102,9 @@ export async function runMigrations() {
     q(`CREATE TABLE IF NOT EXISTS news_articles (id serial PRIMARY KEY, source varchar(64) NOT NULL, title text NOT NULL, url text NOT NULL, published_at timestamp NOT NULL, summary text, image_url text, tags text[], CONSTRAINT news_url_unique UNIQUE(url))`),
     q(`CREATE TABLE IF NOT EXISTS learn_articles (id serial PRIMARY KEY, slug varchar(96) NOT NULL, title text NOT NULL, level varchar(16) NOT NULL, category varchar(32) NOT NULL, content text NOT NULL, CONSTRAINT learn_slug_unique UNIQUE(slug))`),
     q(`CREATE TABLE IF NOT EXISTS wallet_transactions (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, type transaction_type NOT NULL, amount numeric(18,2) NOT NULL, status transaction_status NOT NULL DEFAULT 'SUCCESS', mode varchar(8) DEFAULT 'REAL', reference_id varchar, created_at timestamp DEFAULT now() NOT NULL)`),
+    q(`CREATE TABLE IF NOT EXISTS login_history (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, ip varchar(45), device varchar(255), browser varchar(255), created_at timestamp DEFAULT now() NOT NULL)`),
+    q(`CREATE TABLE IF NOT EXISTS user_activities (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, action varchar(255) NOT NULL, details text, created_at timestamp DEFAULT now() NOT NULL)`),
+    q(`CREATE TABLE IF NOT EXISTS withdrawal_requests (id serial PRIMARY KEY, user_id varchar NOT NULL REFERENCES users(id) ON DELETE CASCADE, amount numeric(18,2) NOT NULL, method varchar(50) NOT NULL, details text NOT NULL, status withdrawal_status NOT NULL DEFAULT 'PENDING', admin_notes text, processed_at timestamp, created_at timestamp DEFAULT now() NOT NULL)`),
   ]);
 
   migrationsDone = true;

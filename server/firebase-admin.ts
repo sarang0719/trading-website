@@ -67,22 +67,49 @@ function ensureInitialized() {
 
 export const firebaseAdmin = {
   auth: () => ensureInitialized().auth(),
-  firestore: () => ensureInitialized().firestore(),
-  messaging: () => ensureInitialized().messaging(),
+  firestore: () => {
+    const app = ensureInitialized();
+    if (!app || app.apps.length === 0) return null;
+    try {
+      return app.firestore();
+    } catch {
+      return null;
+    }
+  },
+  messaging: () => {
+    const app = ensureInitialized();
+    if (!app || app.apps.length === 0) return null;
+    try {
+      return app.messaging();
+    } catch {
+      return null;
+    }
+  },
 };
 
 export const firestore = {
-  collection: (path: string) => firebaseAdmin.firestore().collection(path)
+  collection: (path: string) => {
+    const db = firebaseAdmin.firestore();
+    if (!db) {
+      return {
+        add: async () => {},
+        doc: () => ({ set: async () => {} }),
+      };
+    }
+    return db.collection(path);
+  }
 } as any;
 
 export async function syncUserToFirestore(localUser: any) {
   try {
      const docRef = firestore.collection("users").doc(localUser.id);
-     await docRef.set({
-       ...localUser,
-       lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-     }, { merge: true });
-     console.log(`[Firestore Sync] User ${localUser.email} archived to cloud`);
+     if (docRef.set) {
+       await docRef.set({
+         ...localUser,
+         lastSyncedAt: new Date().toISOString(),
+       }, { merge: true });
+       console.log(`[Firestore Sync] User ${localUser.email} archived to cloud`);
+     }
   } catch (error) {
      console.error("[Firestore Sync] Failed to mirror user to cloud:", error);
   }

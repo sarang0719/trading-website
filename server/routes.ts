@@ -17,7 +17,7 @@ export async function registerRoutes(
 ): Promise<Server> {
   await setupAuth(app);
   registerAuthRoutes(app);
-  
+
   // Add logging middleware
   app.use(requestLogger);
 
@@ -227,10 +227,10 @@ export async function registerRoutes(
     try {
       const userId = req.user.claims.sub as string;
       const orderId = Number(req.params.id);
-      
+
       const orders = await storage.getActiveTimeBasedOrders();
       const trade = orders.find(o => o.id === orderId && String(o.userId) === userId);
-      
+
       if (!trade) {
         return res.status(404).json({ message: "Active trade not found for immediate sale." });
       }
@@ -239,24 +239,24 @@ export async function registerRoutes(
       const { db } = await import("./db");
       const { latestPrices } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
-      
+
       const [priceRow] = await db.select().from(latestPrices).where(eq(latestPrices.instrumentId, trade.instrumentId));
       if (!priceRow || !priceRow.price) return res.status(400).json({ message: "No current price available." });
 
       const currentPrice = parseFloat(priceRow.price as string);
       const strike = parseFloat(trade.strikePrice as string);
       let isWin = false;
-      
+
       if (trade.side === "BUY") isWin = currentPrice > strike;
       if (trade.side === "SELL") isWin = currentPrice < strike;
-      
+
       // Artificial win guarantee override for testing profit mode
       isWin = true;
-      
+
       const parsedAmount = parseFloat(trade.amount as string);
       let returnAmount = 0;
       let status = "LOSS";
-      
+
       if (isWin) {
         returnAmount = parsedAmount + (parsedAmount * 0.85); // standard 85% payout
         status = "WIN";
@@ -268,21 +268,21 @@ export async function registerRoutes(
       });
 
       if (status === "WIN" && returnAmount > 0) {
-          // Check original wallet mode
-          const txs = await storage.getWalletTransactions(userId);
-          const deductTx = txs.find(t => t.referenceId === String(trade.id) && t.type === "TRADE_DEDUCTION");
-          const tradeMode = (deductTx as any)?.mode ?? "REAL";
+        // Check original wallet mode
+        const txs = await storage.getWalletTransactions(userId);
+        const deductTx = txs.find(t => t.referenceId === String(trade.id) && t.type === "TRADE_DEDUCTION");
+        const tradeMode = (deductTx as any)?.mode ?? "REAL";
 
-          if (tradeMode === "DEMO") {
-            await storage.updateDemoBalance(userId, returnAmount);
-          } else {
-            await storage.updateWalletBalance(userId, returnAmount);
-          }
+        if (tradeMode === "DEMO") {
+          await storage.updateDemoBalance(userId, returnAmount);
+        } else {
+          await storage.updateWalletBalance(userId, returnAmount);
+        }
 
-          await storage.createWalletTransaction({
-              userId, type: "TRADE_WIN", amount: String(returnAmount),
-              status: "SUCCESS", referenceId: String(trade.id), mode: tradeMode
-          } as any);
+        await storage.createWalletTransaction({
+          userId, type: "TRADE_WIN", amount: String(returnAmount),
+          status: "SUCCESS", referenceId: String(trade.id), mode: tradeMode
+        } as any);
       }
 
       res.json({ message: "Trade settled immediately.", status, returnAmount });
@@ -363,7 +363,7 @@ export async function registerRoutes(
       if (!user || parseFloat(user.walletBalance as string) < amount) {
         return res.status(400).json({ message: "Insufficient balance" });
       }
-      
+
       const updatedUser = await storage.updateWalletBalance(userId, -amount);
       const tx = await storage.createWalletTransaction({
         userId, type: "WITHDRAW", amount: String(amount), status: "SUCCESS", mode: "REAL"
@@ -386,32 +386,32 @@ export async function registerRoutes(
         notes: { userId: req.user.claims.sub, type: "WALLET_DEPOSIT" }
       });
       return res.json({ orderId: order.id, amount: amount * 100, currency: "INR", keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp" });
-    } catch (e:any) { return res.status(500).json({ message: e.message }); }
+    } catch (e: any) { return res.status(500).json({ message: e.message }); }
   });
 
   app.post("/api/wallet/deposit/verify", isAuthenticated, async (req: any, res) => {
     try {
-       const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
-       const crypto = await import("crypto");
-       const secret = process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d";
-       const expected = crypto.createHmac("sha256", secret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
-       if (expected !== razorpay_signature) return res.status(400).json({ message: "Signature mismatch" });
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = req.body;
+      const crypto = await import("crypto");
+      const secret = process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d";
+      const expected = crypto.createHmac("sha256", secret).update(`${razorpay_order_id}|${razorpay_payment_id}`).digest("hex");
+      if (expected !== razorpay_signature) return res.status(400).json({ message: "Signature mismatch" });
 
-       const userId = req.user.claims.sub as string;
-       // Check idempotency: don't double-credit same payment
-       const existing = await storage.getWalletTransactions(userId);
-       if (existing.some(t => t.referenceId === razorpay_payment_id)) {
-         return res.status(409).json({ message: "Payment already processed" });
-       }
+      const userId = req.user.claims.sub as string;
+      // Check idempotency: don't double-credit same payment
+      const existing = await storage.getWalletTransactions(userId);
+      if (existing.some(t => t.referenceId === razorpay_payment_id)) {
+        return res.status(409).json({ message: "Payment already processed" });
+      }
 
-       const updatedUser = await storage.updateWalletBalance(userId, amount);
-       await storage.createWalletTransaction({
-         userId, type: "DEPOSIT", amount: String(amount), status: "SUCCESS",
-         referenceId: razorpay_payment_id, mode: "REAL"
-       } as any);
+      const updatedUser = await storage.updateWalletBalance(userId, amount);
+      await storage.createWalletTransaction({
+        userId, type: "DEPOSIT", amount: String(amount), status: "SUCCESS",
+        referenceId: razorpay_payment_id, mode: "REAL"
+      } as any);
 
-       res.json({ success: true, newBalance: updatedUser.walletBalance });
-    } catch (e:any) { return res.status(500).json({ message: e.message }); }
+      res.json({ success: true, newBalance: updatedUser.walletBalance });
+    } catch (e: any) { return res.status(500).json({ message: e.message }); }
   });
 
   // Razorpay Webhook — auto verify and credit wallet
@@ -517,16 +517,20 @@ export async function registerRoutes(
 
       // Forward to FastAPI (running on port 8000 by default)
       const pythonAiUrl = process.env.PYTHON_AI_URL || "http://127.0.0.1:8000";
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+
       const response = await fetch(`${pythonAiUrl}/api/predict`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ market, timeframe, candles }),
-      });
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeout));
 
       if (!response.ok) {
-        throw new Error("Python AI service unavailable");
+        throw new Error(`Python AI returned status ${response.status}`);
       }
 
       const prediction = await response.json();
@@ -566,9 +570,9 @@ export async function registerRoutes(
       const userId = req.user.claims.sub as string;
       const user = await storage.getUser(userId);
       if (!user) return res.status(404).json({ message: "User not found" });
-      if (user.isAIBlocked) return res.status(403).json({ 
-        granted: false, 
-        message: "AI prediction services are currently restricted for your account. Contact support." 
+      if (user.isAIBlocked) return res.status(403).json({
+        granted: false,
+        message: "AI prediction services are currently restricted for your account. Contact support."
       });
 
       // Admins: unlimited, never deduct
@@ -594,8 +598,8 @@ export async function registerRoutes(
 
   // ── RAZORPAY ──
   const AI_PLANS: Record<string, { credits: number; amountPaise: number; label: string }> = {
-    starter: { credits: 4,  amountPaise: 50000,  label: "₹500 – 4 AI Predictions" },
-    pro:     { credits: 10, amountPaise: 100000, label: "₹1000 – 10 AI Predictions" },
+    starter: { credits: 4, amountPaise: 50000, label: "₹500 – 4 AI Predictions" },
+    pro: { credits: 10, amountPaise: 100000, label: "₹1000 – 10 AI Predictions" },
   };
 
   app.post("/api/razorpay/create-order", isAuthenticated, async (req: any, res) => {
@@ -605,16 +609,18 @@ export async function registerRoutes(
       if (!plan) return res.status(400).json({ message: "Invalid plan" });
       const Razorpay = (await import("razorpay")).default;
       const rzp = new Razorpay({
-        key_id:    process.env.RAZORPAY_KEY_ID    || "rzp_test_SYjafmuTvifatp",
+        key_id: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp",
         key_secret: process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d",
       });
       const order = await rzp.orders.create({
         amount: plan.amountPaise, currency: "INR",
         notes: { planId, userId: req.user.claims.sub },
       });
-      return res.json({ orderId: order.id, amount: plan.amountPaise, currency: "INR",
+      return res.json({
+        orderId: order.id, amount: plan.amountPaise, currency: "INR",
         keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_SYjafmuTvifatp",
-        planLabel: plan.label, credits: plan.credits });
+        planLabel: plan.label, credits: plan.credits
+      });
     } catch (err: any) {
       return res.status(500).json({ message: err.message || "Failed to create order" });
     }
@@ -623,8 +629,10 @@ export async function registerRoutes(
   app.post("/api/razorpay/verify", isAuthenticated, async (req: any, res) => {
     try {
       const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planId } =
-        z.object({ razorpay_order_id: z.string(), razorpay_payment_id: z.string(),
-          razorpay_signature: z.string(), planId: z.string() }).parse(req.body);
+        z.object({
+          razorpay_order_id: z.string(), razorpay_payment_id: z.string(),
+          razorpay_signature: z.string(), planId: z.string()
+        }).parse(req.body);
       const crypto = await import("crypto");
       const secret = process.env.RAZORPAY_KEY_SECRET || "kqh3FVifvQJFCkfcv056TS6d";
       const expected = crypto.createHmac("sha256", secret)
@@ -701,7 +709,7 @@ export async function registerRoutes(
       // Deduct balance immediately and create a pending request
       // We deduct now to "freeze" the funds. If rejected, we refund.
       await storage.updateWalletBalance(userId, -amountVal);
-      
+
       const request = await storage.createWithdrawalRequest({
         userId,
         amount,
@@ -766,9 +774,9 @@ export async function registerRoutes(
 
       const loginHistory = await storage.getLoginHistory(userId);
       const activities = await storage.getUserActivities(userId);
-      
+
       // Also get their orders/trades
-      const orders = await storage.listOrders(userId); 
+      const orders = await storage.listOrders(userId);
       const timeTrades = await storage.listTimeBasedOrders(userId);
       const transactions = await storage.getWalletTransactions(userId);
 
@@ -783,7 +791,7 @@ export async function registerRoutes(
         transactions,
       });
     } catch (err: any) {
-       res.status(500).json({ message: err.message });
+      res.status(500).json({ message: err.message });
     }
   });
 
@@ -797,18 +805,18 @@ export async function registerRoutes(
       }).parse(req.body);
 
       const updated = await storage.updateUserAdminFlags(userId, { isBlocked, isAIBlocked });
-      
+
       // Log the change as an activity
       if (isBlocked !== undefined) {
-         await storage.logActivity(userId, isBlocked ? "BLOCKED" : "UNBLOCKED", "Status changed by administrator");
+        await storage.logActivity(userId, isBlocked ? "BLOCKED" : "UNBLOCKED", "Status changed by administrator");
       }
       if (isAIBlocked !== undefined) {
-         await storage.logActivity(userId, isAIBlocked ? "AI_RESTRICTED" : "AI_ENABLED", "AI access changed by administrator");
+        await storage.logActivity(userId, isAIBlocked ? "AI_RESTRICTED" : "AI_ENABLED", "AI access changed by administrator");
       }
 
       res.json(updated);
     } catch (err: any) {
-       res.status(400).json({ message: err.message });
+      res.status(400).json({ message: err.message });
     }
   });
 
@@ -879,7 +887,7 @@ export async function registerRoutes(
               if (inst && (inst as any).id) {
                 await storage.updateLatestPrice((inst as any).id, String(currentPrice), String(changeAbs), String(changePct));
               }
-            }).catch(() => {});
+            }).catch(() => { });
 
             return res.json({
               symbol,
@@ -891,7 +899,7 @@ export async function registerRoutes(
             });
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     // Live Finnhub Quote check for Forex, Stocks, and Commodities right away before static DB cache
@@ -902,7 +910,7 @@ export async function registerRoutes(
         if (symbol === "XAUUSD") fhSym = "OANDA:XAU_USD";
         else if (symbol === "XAGUSD") fhSym = "OANDA:XAG_USD";
         else if (symbol === "WTIUSD") fhSym = "OANDA:WTICO_USD";
-        else if (symbol.length === 6 && !symbol.endsWith("USDT")) fhSym = `OANDA:${symbol.slice(0,3)}_${symbol.slice(3,6)}`;
+        else if (symbol.length === 6 && !symbol.endsWith("USDT")) fhSym = `OANDA:${symbol.slice(0, 3)}_${symbol.slice(3, 6)}`;
 
         const fhRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${fhSym}&token=${FINNHUB_API_KEY}`);
         if (fhRes.ok) {
@@ -916,7 +924,7 @@ export async function registerRoutes(
               if (inst && (inst as any).id) {
                 await storage.updateLatestPrice((inst as any).id, String(currentPrice), String(changeAbs), String(changePct));
               }
-            }).catch(() => {});
+            }).catch(() => { });
 
             return res.json({
               symbol,
@@ -928,7 +936,7 @@ export async function registerRoutes(
             });
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     // ── Spot Gold (XAUUSD / PAXGUSDT / XAUTUSDT) Direct Binance Spot Engine ──
@@ -952,7 +960,7 @@ export async function registerRoutes(
               if (inst && (inst as any).id) {
                 await storage.updateLatestPrice((inst as any).id, String(currentPrice), String(changeAbs), String(changePct));
               }
-            }).catch(() => {});
+            }).catch(() => { });
 
             return res.json({
               symbol,
@@ -964,7 +972,7 @@ export async function registerRoutes(
             });
           }
         }
-      } catch (err) {}
+      } catch (err) { }
     }
 
     // TwelveData Live Spot Price for Metals (XAUUSD, XAGUSD) to match TradingView Spot CFD exactly
@@ -996,7 +1004,7 @@ export async function registerRoutes(
               if (inst && (inst as any).id) {
                 await storage.updateLatestPrice((inst as any).id, String(currentPrice), "0.01", "0.01");
               }
-            }).catch(() => {});
+            }).catch(() => { });
 
             return res.json({
               symbol,
@@ -1008,7 +1016,7 @@ export async function registerRoutes(
             });
           }
         }
-      } catch (err) {}
+      } catch (err) { }
 
       // Alpha Vantage Live Quote Tier (Connected via user key QLBZRUQ9VKZGF42A)
       const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY || "QLBZRUQ9VKZGF42A";
@@ -1035,7 +1043,7 @@ export async function registerRoutes(
               });
             }
           }
-        } catch (err) {}
+        } catch (err) { }
       }
 
       if (cached) {
@@ -1074,7 +1082,7 @@ export async function registerRoutes(
             if (inst && (inst as any).id) {
               await storage.updateLatestPrice((inst as any).id, String(currentPrice), String(changeAbs), String(changePct));
             }
-          }).catch(() => {});
+          }).catch(() => { });
 
           return res.json({
             symbol,
@@ -1086,22 +1094,22 @@ export async function registerRoutes(
           });
         }
       }
-    } catch (err) {}
+    } catch (err) { }
 
     try {
       const instrument = await storage.getInstrumentBySymbol(symbol);
       if (instrument && instrument.price) {
         return res.json({
-          symbol, 
-          price: parseFloat(instrument.price as string), 
-          changeAbs: instrument.changeAbs ? parseFloat(instrument.changeAbs as string) : 0, 
+          symbol,
+          price: parseFloat(instrument.price as string),
+          changeAbs: instrument.changeAbs ? parseFloat(instrument.changeAbs as string) : 0,
           changePct: instrument.changePct ? parseFloat(instrument.changePct as string) : 0,
-          asOf: new Date().toISOString(), 
+          asOf: new Date().toISOString(),
           source: "Database Cache"
         });
       }
     } catch (err) {
-       console.error("Price fetch error:", err);
+      console.error("Price fetch error:", err);
     }
 
     return res.json({ symbol, price: null, source: "unavailable" });
@@ -1127,7 +1135,7 @@ export async function registerRoutes(
       // 1. Check asset type
       const isCrypto = symbol.endsWith("USDT") || symbol.endsWith("USDC") || symbol === "BTCUSD";
       const isMetals = ["XAUUSD", "XAGUSD", "PAXGUSDT"].includes(symbol);
-      const isForex  = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "GBPJPY", "USDCAD", "USDPKR", "USDINR", "CADCHF", "WTIUSD"].includes(symbol) || (symbol.length === 6 && !isCrypto && !isMetals);
+      const isForex = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "GBPJPY", "USDCAD", "USDPKR", "USDINR", "CADCHF", "WTIUSD"].includes(symbol) || (symbol.length === 6 && !isCrypto && !isMetals);
 
       // ── Priority Tier 1: Binance API for Crypto & Gold (BTCUSD / PAXGUSDT / XAUUSD) ─
       if (isCrypto || symbol === "PAXGUSDT" || symbol === "XAUUSD" || symbol === "XAUTUSDT") {
@@ -1221,222 +1229,222 @@ export async function registerRoutes(
 
       // ── Tier 2: Yahoo Finance Universal Proxy (Stocks, Forex, Commodities, ETFs) ──
       if (results.length === 0 && symbol !== "XAUUSD" && symbol !== "XAGUSD") {
-         source = "Yahoo Finance";
-         let yahooSym = symbol;
-         if (symbol === "WTIUSD") yahooSym = "CL=F";
-         else if (isForex) yahooSym = `${symbol}=X`;
+        source = "Yahoo Finance";
+        let yahooSym = symbol;
+        if (symbol === "WTIUSD") yahooSym = "CL=F";
+        else if (isForex) yahooSym = `${symbol}=X`;
 
-         const yahooIntMap: any = {
-           "1m": { int: "1m", range: "5d" },
-           "2m": { int: "2m", range: "1mo" },
-           "3m": { int: "5m", range: "1mo" },
-           "5m": { int: "5m", range: "1mo" },
-           "15m": { int: "15m", range: "1mo" },
-           "30m": { int: "30m", range: "1mo" },
-           "1H": { int: "60m", range: "3mo" },
-           "4H": { int: "60m", range: "3mo" },
-           "1D": { int: "1d", range: "1y" },
-           "1W": { int: "1wk", range: "5y" },
-           "1M": { int: "1mo", range: "10y" }
-         };
-         const cfg = yahooIntMap[interval] || { int: "15m", range: "1mo" };
-         
-         try {
-           const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}?interval=${cfg.int}&range=${cfg.range}`, {
-             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-           });
-           if (yRes.ok) {
-             const yData = await yRes.json();
-             const chartRes = yData.chart?.result?.[0];
-             if (chartRes && chartRes.timestamp && chartRes.indicators?.quote?.[0]) {
-               const timestamps = chartRes.timestamp;
-               const quote = chartRes.indicators.quote[0];
-               const { open = [], high = [], low = [], close = [], volume = [] } = quote;
-               results = [];
-               for (let i = 0; i < timestamps.length; i++) {
-                 if (open[i] != null && close[i] != null) {
-                   const o = parseFloat(open[i]);
-                   const c = parseFloat(close[i]);
-                   const h = parseFloat(high[i] ?? Math.max(o, c));
-                   const l = parseFloat(low[i] ?? Math.min(o, c));
-                   results.push({
-                     time: timestamps[i],
-                     open: Number(o.toFixed(6)),
-                     high: Number(h.toFixed(6)),
-                     low: Number(l.toFixed(6)),
-                     close: Number(c.toFixed(6)),
-                     volume: parseFloat(volume[i] || 0)
-                   });
-                 }
-               }
-               results.sort((a, b) => a.time - b.time);
-             }
-           }
-         } catch (err) {
-           console.warn(`[Yahoo Proxy] Failed for ${yahooSym}:`, err);
-         }
+        const yahooIntMap: any = {
+          "1m": { int: "1m", range: "5d" },
+          "2m": { int: "2m", range: "1mo" },
+          "3m": { int: "5m", range: "1mo" },
+          "5m": { int: "5m", range: "1mo" },
+          "15m": { int: "15m", range: "1mo" },
+          "30m": { int: "30m", range: "1mo" },
+          "1H": { int: "60m", range: "3mo" },
+          "4H": { int: "60m", range: "3mo" },
+          "1D": { int: "1d", range: "1y" },
+          "1W": { int: "1wk", range: "5y" },
+          "1M": { int: "1mo", range: "10y" }
+        };
+        const cfg = yahooIntMap[interval] || { int: "15m", range: "1mo" };
+
+        try {
+          const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSym)}?interval=${cfg.int}&range=${cfg.range}`, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+          });
+          if (yRes.ok) {
+            const yData = await yRes.json();
+            const chartRes = yData.chart?.result?.[0];
+            if (chartRes && chartRes.timestamp && chartRes.indicators?.quote?.[0]) {
+              const timestamps = chartRes.timestamp;
+              const quote = chartRes.indicators.quote[0];
+              const { open = [], high = [], low = [], close = [], volume = [] } = quote;
+              results = [];
+              for (let i = 0; i < timestamps.length; i++) {
+                if (open[i] != null && close[i] != null) {
+                  const o = parseFloat(open[i]);
+                  const c = parseFloat(close[i]);
+                  const h = parseFloat(high[i] ?? Math.max(o, c));
+                  const l = parseFloat(low[i] ?? Math.min(o, c));
+                  results.push({
+                    time: timestamps[i],
+                    open: Number(o.toFixed(6)),
+                    high: Number(h.toFixed(6)),
+                    low: Number(l.toFixed(6)),
+                    close: Number(c.toFixed(6)),
+                    volume: parseFloat(volume[i] || 0)
+                  });
+                }
+              }
+              results.sort((a, b) => a.time - b.time);
+            }
+          }
+        } catch (err) {
+          console.warn(`[Yahoo Proxy] Failed for ${yahooSym}:`, err);
+        }
       }
 
       // ── Tier 3: Alpha Vantage & TwelveData Fallback (All Non-Crypto Markets) ──
       if (results.length === 0 && !isCrypto) {
-         // 3a. TwelveData universal time_series check
-         try {
-           source = "TwelveData";
-           const tdIntMap: any = {
-             "1m": "1min", "2m": "1min", "3m": "5min", "5m": "5min", "15m": "15min", "30m": "30min",
-             "1H": "1h", "4H": "4h", "1D": "1day", "1W": "1week", "1M": "1month"
-           };
-           const tdInt = tdIntMap[interval] || "15min";
-           let tdSym = symbol;
-           if (isForex || isMetals) tdSym = `${symbol.slice(0,3)}/${symbol.slice(3,6)}`;
-           const tdRes = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tdInt}&outputsize=500&apikey=${TWELVEDATA_API_KEY}`);
-           if (tdRes.ok) {
-             const tdData = await tdRes.json() as any;
-             if (tdData && tdData.values && Array.isArray(tdData.values)) {
-                results = tdData.values.map((v: any) => {
-                  const dtStr = String(v.datetime);
-                  const utcStr = dtStr.endsWith("Z") || dtStr.includes("+") ? dtStr : `${dtStr} UTC`;
-                  return {
-                    time: Math.floor(new Date(utcStr).getTime() / 1000),
-                    open: parseFloat(v.open),
-                    high: parseFloat(v.high),
-                    low: parseFloat(v.low),
-                    close: parseFloat(v.close),
-                    volume: parseFloat(v.volume || 0)
-                  };
-                }).filter((r: any) => !isNaN(r.close)).sort((a: any, b: any) => a.time - b.time);
-              }
-           }
-         } catch {}
+        // 3a. TwelveData universal time_series check
+        try {
+          source = "TwelveData";
+          const tdIntMap: any = {
+            "1m": "1min", "2m": "1min", "3m": "5min", "5m": "5min", "15m": "15min", "30m": "30min",
+            "1H": "1h", "4H": "4h", "1D": "1day", "1W": "1week", "1M": "1month"
+          };
+          const tdInt = tdIntMap[interval] || "15min";
+          let tdSym = symbol;
+          if (isForex || isMetals) tdSym = `${symbol.slice(0, 3)}/${symbol.slice(3, 6)}`;
+          const tdRes = await fetch(`https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tdInt}&outputsize=500&apikey=${TWELVEDATA_API_KEY}`);
+          if (tdRes.ok) {
+            const tdData = await tdRes.json() as any;
+            if (tdData && tdData.values && Array.isArray(tdData.values)) {
+              results = tdData.values.map((v: any) => {
+                const dtStr = String(v.datetime);
+                const utcStr = dtStr.endsWith("Z") || dtStr.includes("+") ? dtStr : `${dtStr} UTC`;
+                return {
+                  time: Math.floor(new Date(utcStr).getTime() / 1000),
+                  open: parseFloat(v.open),
+                  high: parseFloat(v.high),
+                  low: parseFloat(v.low),
+                  close: parseFloat(v.close),
+                  volume: parseFloat(v.volume || 0)
+                };
+              }).filter((r: any) => !isNaN(r.close)).sort((a: any, b: any) => a.time - b.time);
+            }
+          }
+        } catch { }
 
-         // 3b. Alpha Vantage check if TwelveData didn't return bars
-         if (results.length === 0 && !isForex && !isMetals) {
-           source = "Alpha Vantage";
-           const avMap: any = { "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1H": "60min" };
-           let fn = interval.endsWith("m") || interval === "1H" ? "TIME_SERIES_INTRADAY" : "TIME_SERIES_DAILY";
-           let avIntParams = fn === "TIME_SERIES_INTRADAY" ? `&interval=${avMap[interval] || "60min"}` : "";
-           
-           try {
-             const avRes = await fetch(`https://www.alphavantage.co/query?function=${fn}&symbol=${symbol}${avIntParams}&outputsize=compact&apikey=${ALPHA_VANTAGE_API_KEY}`);
-             if (avRes.ok) {
-               const data = await avRes.json();
-               const seriesKey = Object.keys(data).find(k => k.includes("Time Series"));
-               if (seriesKey && data[seriesKey]) {
-                 const series = data[seriesKey];
-                 results = Object.keys(series).map(k => {
-                   const item = series[k];
-                   return {
-                     time: Math.floor(new Date(k).getTime() / 1000),
-                     open: parseFloat(item["1. open"]),
-                     high: parseFloat(item["2. high"]),
-                     low: parseFloat(item["3. low"]),
-                     close: parseFloat(item["4. close"]),
-                     volume: parseFloat(item["5. volume"]) || 0
-                   };
-                 }).sort((a,b) => a.time - b.time);
-               }
-             }
-           } catch {}
-         }
+        // 3b. Alpha Vantage check if TwelveData didn't return bars
+        if (results.length === 0 && !isForex && !isMetals) {
+          source = "Alpha Vantage";
+          const avMap: any = { "1m": "1min", "5m": "5min", "15m": "15min", "30m": "30min", "1H": "60min" };
+          let fn = interval.endsWith("m") || interval === "1H" ? "TIME_SERIES_INTRADAY" : "TIME_SERIES_DAILY";
+          let avIntParams = fn === "TIME_SERIES_INTRADAY" ? `&interval=${avMap[interval] || "60min"}` : "";
+
+          try {
+            const avRes = await fetch(`https://www.alphavantage.co/query?function=${fn}&symbol=${symbol}${avIntParams}&outputsize=compact&apikey=${ALPHA_VANTAGE_API_KEY}`);
+            if (avRes.ok) {
+              const data = await avRes.json();
+              const seriesKey = Object.keys(data).find(k => k.includes("Time Series"));
+              if (seriesKey && data[seriesKey]) {
+                const series = data[seriesKey];
+                results = Object.keys(series).map(k => {
+                  const item = series[k];
+                  return {
+                    time: Math.floor(new Date(k).getTime() / 1000),
+                    open: parseFloat(item["1. open"]),
+                    high: parseFloat(item["2. high"]),
+                    low: parseFloat(item["3. low"]),
+                    close: parseFloat(item["4. close"]),
+                    volume: parseFloat(item["5. volume"]) || 0
+                  };
+                }).sort((a, b) => a.time - b.time);
+              }
+            }
+          } catch { }
+        }
       }
 
       // ── Tier 4: Guaranteed Institutional Synthetic Calibration ─────────────
       // Never return empty [] or cause broken flat candles when APIs rate-limit
       if (results.length === 0) {
-         source = "Institutional Calibration";
-         const inst = await storage.getInstrumentBySymbol(symbol);
-         let basePrice = 0;
+        source = "Institutional Calibration";
+        const inst = await storage.getInstrumentBySymbol(symbol);
+        let basePrice = 0;
 
-         // For metals, prioritize the live spot price cache to ensure 100% price synchronization
-         if ((symbol === "XAUUSD" || symbol === "XAGUSD") && metalPriceCache.has(symbol)) {
-           basePrice = metalPriceCache.get(symbol)!.price;
-         }
+        // For metals, prioritize the live spot price cache to ensure 100% price synchronization
+        if ((symbol === "XAUUSD" || symbol === "XAGUSD") && metalPriceCache.has(symbol)) {
+          basePrice = metalPriceCache.get(symbol)!.price;
+        }
 
-         // Check live quote from Finnhub if basePrice is not resolved
-         if (basePrice === 0 && FINNHUB_API_KEY) {
-           try {
-             let fhSym = symbol;
-             if (isCrypto) fhSym = `BINANCE:${symbol}`;
-             else if (symbol === "XAUUSD") fhSym = "OANDA:XAU_USD";
-             else if (symbol === "XAGUSD") fhSym = "OANDA:XAG_USD";
-             else if (isForex) fhSym = `OANDA:${symbol.slice(0,3)}_${symbol.slice(3,6)}`;
+        // Check live quote from Finnhub if basePrice is not resolved
+        if (basePrice === 0 && FINNHUB_API_KEY) {
+          try {
+            let fhSym = symbol;
+            if (isCrypto) fhSym = `BINANCE:${symbol}`;
+            else if (symbol === "XAUUSD") fhSym = "OANDA:XAU_USD";
+            else if (symbol === "XAGUSD") fhSym = "OANDA:XAG_USD";
+            else if (isForex) fhSym = `OANDA:${symbol.slice(0, 3)}_${symbol.slice(3, 6)}`;
 
-             const qRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${fhSym}&token=${FINNHUB_API_KEY}`);
-             if (qRes.ok) {
-               const qData = await qRes.json() as any;
-               if (qData && qData.c && qData.c > 0 && !qData.error) {
-                 const fetchedPrice = parseFloat(qData.c);
-                 if (symbol !== "XAUUSD" || fetchedPrice >= 3500) {
-                   basePrice = fetchedPrice;
-                 }
-               }
-             }
-           } catch {}
-         }
+            const qRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${fhSym}&token=${FINNHUB_API_KEY}`);
+            if (qRes.ok) {
+              const qData = await qRes.json() as any;
+              if (qData && qData.c && qData.c > 0 && !qData.error) {
+                const fetchedPrice = parseFloat(qData.c);
+                if (symbol !== "XAUUSD" || fetchedPrice >= 3500) {
+                  basePrice = fetchedPrice;
+                }
+              }
+            }
+          } catch { }
+        }
 
-         if (basePrice === 0) {
-           if (inst && (inst as any).price && parseFloat(String((inst as any).price)) > 0) {
-             basePrice = parseFloat(String((inst as any).price));
-           }
-           else if (symbol === "EURUSD") basePrice = 1.0850;
-           else if (symbol === "GBPUSD") basePrice = 1.2850;
-           else if (symbol === "USDJPY") basePrice = 157.50;
-           else if (symbol === "XAUUSD") basePrice = 4028.50;
-           else if (symbol === "AAPL") basePrice = 340.00;
-           else if (symbol === "TSLA") basePrice = 307.00;
-           else if (symbol === "NVDA") basePrice = 197.00;
-           else if (symbol === "SPY")  basePrice = 740.00;
-           else basePrice = 100;
-         }
+        if (basePrice === 0) {
+          if (inst && (inst as any).price && parseFloat(String((inst as any).price)) > 0) {
+            basePrice = parseFloat(String((inst as any).price));
+          }
+          else if (symbol === "EURUSD") basePrice = 1.0850;
+          else if (symbol === "GBPUSD") basePrice = 1.2850;
+          else if (symbol === "USDJPY") basePrice = 157.50;
+          else if (symbol === "XAUUSD") basePrice = 4028.50;
+          else if (symbol === "AAPL") basePrice = 340.00;
+          else if (symbol === "TSLA") basePrice = 307.00;
+          else if (symbol === "NVDA") basePrice = 197.00;
+          else if (symbol === "SPY") basePrice = 740.00;
+          else basePrice = 100;
+        }
 
-         const nowSec = Math.floor(Date.now() / 1000);
-         const intSecs = interval.endsWith('m') ? parseInt(interval) * 60 : interval.endsWith('H') ? parseInt(interval) * 3600 : 86400;
-         const rawCandles: any[] = [];
-         let currClose = basePrice;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const intSecs = interval.endsWith('m') ? parseInt(interval) * 60 : interval.endsWith('H') ? parseInt(interval) * 3600 : 86400;
+        const rawCandles: any[] = [];
+        let currClose = basePrice;
 
-         for (let i = 0; i < 120; i++) {
-           const t = nowSec - (i * intSecs);
-           const change = (Math.sin(i * 0.3) + (Math.cos(i * 0.7) * 0.5)) * 0.0012 * currClose;
-           const c = currClose;
-           const o = currClose - change;
-           const h = Math.max(o, c) + Math.abs(change) * 0.3;
-           const l = Math.min(o, c) - Math.abs(change) * 0.3;
-           rawCandles.push({
-             time: t,
-             open: Number(o.toFixed(4)),
-             high: Number(h.toFixed(4)),
-             low: Number(l.toFixed(4)),
-             close: Number(c.toFixed(4)),
-             volume: Math.floor(Math.random() * 5000) + 1000
-           });
-           currClose = o;
-         }
-         results = rawCandles.reverse();
-       }
+        for (let i = 0; i < 120; i++) {
+          const t = nowSec - (i * intSecs);
+          const change = (Math.sin(i * 0.3) + (Math.cos(i * 0.7) * 0.5)) * 0.0012 * currClose;
+          const c = currClose;
+          const o = currClose - change;
+          const h = Math.max(o, c) + Math.abs(change) * 0.3;
+          const l = Math.min(o, c) - Math.abs(change) * 0.3;
+          rawCandles.push({
+            time: t,
+            open: Number(o.toFixed(4)),
+            high: Number(h.toFixed(4)),
+            low: Number(l.toFixed(4)),
+            close: Number(c.toFixed(4)),
+            volume: Math.floor(Math.random() * 5000) + 1000
+          });
+          currClose = o;
+        }
+        results = rawCandles.reverse();
+      }
 
-       // Sanitize and deduplicate candles
-       const sanitizedMap = new Map<number, any>();
-       for (const r of results) {
-         const time = Number(r.time);
-         const open = Number(r.open);
-         const close = Number(r.close);
-         if (isNaN(time) || isNaN(open) || isNaN(close)) continue;
-         let high = Number(r.high);
-         let low = Number(r.low);
-         if (isNaN(high) || high < Math.max(open, close)) high = Math.max(open, close);
-         if (isNaN(low) || low > Math.min(open, close)) low = Math.min(open, close);
-         sanitizedMap.set(time, {
-           time,
-           open,
-           high,
-           low,
-           close,
-           volume: Number(r.volume || 0)
-         });
-       }
-       results = Array.from(sanitizedMap.values()).sort((a, b) => a.time - b.time);
+      // Sanitize and deduplicate candles
+      const sanitizedMap = new Map<number, any>();
+      for (const r of results) {
+        const time = Number(r.time);
+        const open = Number(r.open);
+        const close = Number(r.close);
+        if (isNaN(time) || isNaN(open) || isNaN(close)) continue;
+        let high = Number(r.high);
+        let low = Number(r.low);
+        if (isNaN(high) || high < Math.max(open, close)) high = Math.max(open, close);
+        if (isNaN(low) || low > Math.min(open, close)) low = Math.min(open, close);
+        sanitizedMap.set(time, {
+          time,
+          open,
+          high,
+          low,
+          close,
+          volume: Number(r.volume || 0)
+        });
+      }
+      results = Array.from(sanitizedMap.values()).sort((a, b) => a.time - b.time);
 
-       return res.json({ results, source });
+      return res.json({ results, source });
     } catch (err: any) {
       return res.json({ results: [], source: "API Error Fallback" });
     }

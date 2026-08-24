@@ -12,6 +12,7 @@ import { useTimeTrades } from "@/hooks/use-time-trades";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
+import { BankLiquidityPopUp, type BankLiquiditySweepData } from "./BankLiquidityPopUp";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,10 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
   const instrumentsQuery = useInstruments();
   const { placeTrade } = useTimeTrades();
   const lastOrderTimeRef = useRef<number | null>(null);
+  const lastSweepKeyRef = useRef<string | null>(null);
+
+  const [sweepPopUpOpen, setSweepPopUpOpen] = useState(false);
+  const [activeSweepData, setActiveSweepData] = useState<BankLiquiditySweepData | null>(null);
 
   // ── Stable refs — never change identity, never trigger re-renders ─────────
   const wsRef      = useRef<WebSocket | null>(null);
@@ -221,6 +226,42 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
         setLastTime(new Date());
         setLoading(false);
         
+        // --- BANK LIQUIDITY SWEEP POP-UP & TOAST TRIGGER ---
+        if (currentSignal && (currentSignal.sweptLo || currentSignal.sweptHi)) {
+          const sweepKey = `${symUpper}-${currentSignal.time}-${currentSignal.sweptLo ? "LO" : "HI"}`;
+          if (lastSweepKeyRef.current !== sweepKey) {
+            lastSweepKeyRef.current = sweepKey;
+            const sweepData: BankLiquiditySweepData = {
+              symbol: symUpper,
+              direction: currentSignal.direction as "BUY" | "SELL",
+              entryPrice: currentSignal.entryPrice,
+              stopLoss: currentSignal.stopLoss,
+              takeProfit: currentSignal.takeProfit,
+              supLevel: currentSignal.supLevel,
+              resLevel: currentSignal.resLevel,
+              sweptLo: currentSignal.sweptLo,
+              sweptHi: currentSignal.sweptHi,
+              time: currentSignal.time,
+            };
+            setActiveSweepData(sweepData);
+            setSweepPopUpOpen(true);
+
+            const slDiff = Math.abs(currentSignal.entryPrice - currentSignal.stopLoss);
+            const isForex = symUpper.includes("EUR") || symUpper.includes("GBP") || (symUpper.includes("USD") && !symUpper.includes("XAU") && !symUpper.includes("BTC") && !symUpper.includes("ETH") && symUpper.length === 6);
+            const isGold = symUpper.includes("XAU");
+
+            const ptsStr = isForex ? `${(slDiff * 100000).toFixed(0)} pts` : isGold ? `$${slDiff.toFixed(2)} pts` : `${slDiff > 100 ? slDiff.toFixed(0) : slDiff.toFixed(2)} pts`;
+            const pipsStr = isForex ? `${(slDiff * 10000).toFixed(1)} pips` : isGold ? `${(slDiff * 10).toFixed(1)} pips` : `${(slDiff * 10).toFixed(0)} pips`;
+
+            toast({
+              title: `⚡ BANK LIQUIDITY SWEEP DETECTED! (${ptsStr} / ${pipsStr})`,
+              description: `Institutional stop-hunt collected retail stop-losses before directional reversal. Click details to view full breakdown.`,
+              className: "border-2 border-amber-500/80 bg-zinc-950/95 text-amber-300 shadow-2xl shadow-amber-500/20 backdrop-blur-md rounded-xl p-4",
+              duration: 8000,
+            });
+          }
+        }
+
         // --- AUTO INVEST LOGIC ---
         if (autoInvest && currentSignal && currentSignal.direction !== "HOLD") {
            // We only want to fire once per signal timestamp
@@ -538,27 +579,109 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             )}
           </div>
 
-          {/* SL / TP Grid */}
-          {signal && (
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-secondary/30 rounded-xl p-3 text-center">
-                <div className="text-[9px] uppercase text-muted-foreground tracking-widest mb-1">Entry</div>
-                <div className="font-bold text-sm">{priceStr(signal.entryPrice)}</div>
-              </div>
-              <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 text-center">
-                <div className="text-[9px] uppercase text-rose-400 tracking-widest mb-1 flex items-center justify-center gap-1">
-                  <ShieldCheck className="w-2.5 h-2.5" /> Stop
+          {/* SL / TP Grid with Points & Pips + Bank Sweep Analytics */}
+          {signal && (() => {
+            const isForex = symbol.includes("EUR") || symbol.includes("GBP") || symbol.includes("USD") && !symbol.includes("XAU") && !symbol.includes("BTC") && !symbol.includes("ETH") && symbol.length === 6;
+            const isGold = symbol.toUpperCase().includes("XAU");
+            
+            const slDiff = Math.abs(signal.entryPrice - signal.stopLoss);
+            const tpDiff = Math.abs(signal.takeProfit - signal.entryPrice);
+
+            let slPointsStr = "";
+            let slPipsStr = "";
+            let tpPointsStr = "";
+            let tpPipsStr = "";
+
+            if (isForex) {
+              const pipsSL = (slDiff * 10000).toFixed(1);
+              const pipsTP = (tpDiff * 10000).toFixed(1);
+              slPointsStr = `${pipsSL} pips`;
+              slPipsStr = `${(slDiff * 100000).toFixed(0)} pts`;
+              tpPointsStr = `${pipsTP} pips`;
+              tpPipsStr = `${(tpDiff * 100000).toFixed(0)} pts`;
+            } else if (isGold) {
+              const ptsSL = slDiff.toFixed(2);
+              const pipsSL = (slDiff * 10).toFixed(1);
+              const ptsTP = tpDiff.toFixed(2);
+              const pipsTP = (tpDiff * 10).toFixed(1);
+              slPointsStr = `$${ptsSL} pts`;
+              slPipsStr = `${pipsSL} pips`;
+              tpPointsStr = `$${ptsTP} pts`;
+              tpPipsStr = `${pipsTP} pips`;
+            } else {
+              const ptsSL = slDiff > 100 ? slDiff.toFixed(0) : slDiff.toFixed(2);
+              const ptsTP = tpDiff > 100 ? tpDiff.toFixed(0) : tpDiff.toFixed(2);
+              slPointsStr = `${ptsSL} pts`;
+              slPipsStr = `${(slDiff * 10).toFixed(0)} pips`;
+              tpPointsStr = `${ptsTP} pts`;
+              tpPipsStr = `${(tpDiff * 10).toFixed(0)} pips`;
+            }
+
+            const bankSweepActive = (isBuy && signal.sweptLo) || (isSell && signal.sweptHi);
+            const sweepType = isBuy ? "Sell-Stop Liquidity Sweep (Low)" : "Buy-Stop Liquidity Sweep (High)";
+
+            return (
+              <div className="space-y-2">
+                {/* Bank Stop Loss Collection Badge */}
+                {bankSweepActive && (
+                  <div
+                    onClick={() => {
+                      if (signal) {
+                        setActiveSweepData({
+                          symbol: symbol.toUpperCase(),
+                          direction: signal.direction as "BUY" | "SELL",
+                          entryPrice: signal.entryPrice,
+                          stopLoss: signal.stopLoss,
+                          takeProfit: signal.takeProfit,
+                          supLevel: signal.supLevel,
+                          resLevel: signal.resLevel,
+                          sweptLo: signal.sweptLo,
+                          sweptHi: signal.sweptHi,
+                          time: signal.time,
+                        });
+                        setSweepPopUpOpen(true);
+                      }
+                    }}
+                    className="bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 cursor-pointer transition-all rounded-xl p-2.5 flex items-center justify-between text-xs text-amber-400 group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="animate-pulse flex h-2 w-2 rounded-full bg-amber-400" />
+                      <span className="font-bold group-hover:underline">⚡ Bank Stop-Loss Collection Active</span>
+                    </div>
+                    <div className="text-[11px] font-mono bg-amber-500/20 group-hover:bg-amber-500/30 px-2.5 py-0.5 rounded text-amber-300 flex items-center gap-1">
+                      {sweepType} · {slPointsStr} ({slPipsStr}) <span className="text-[10px] text-amber-400 font-bold">→ View Pop-Up</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-secondary/30 rounded-xl p-3 text-center">
+                    <div className="text-[9px] uppercase text-muted-foreground tracking-widest mb-1">Entry Price</div>
+                    <div className="font-bold text-sm">{priceStr(signal.entryPrice)}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">Base Level</div>
+                  </div>
+                  <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-3 text-center">
+                    <div className="text-[9px] uppercase text-rose-400 tracking-widest mb-1 flex items-center justify-center gap-1">
+                      <ShieldCheck className="w-2.5 h-2.5" /> Stop Loss
+                    </div>
+                    <div className="font-bold text-sm text-rose-400">{priceStr(signal.stopLoss)}</div>
+                    <div className="text-[10px] font-semibold text-rose-400/90 mt-0.5">
+                      -{slPointsStr} <span className="text-rose-400/70 font-normal">({slPipsStr})</span>
+                    </div>
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
+                    <div className="text-[9px] uppercase text-emerald-400 tracking-widest mb-1 flex items-center justify-center gap-1">
+                      <Target className="w-2.5 h-2.5" /> Take Profit
+                    </div>
+                    <div className="font-bold text-sm text-emerald-400">{priceStr(signal.takeProfit)}</div>
+                    <div className="text-[10px] font-semibold text-emerald-400/90 mt-0.5">
+                      +{tpPointsStr} <span className="text-emerald-400/70 font-normal">({tpPipsStr})</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="font-bold text-sm text-rose-400">{priceStr(signal.stopLoss)}</div>
               </div>
-              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 text-center">
-                <div className="text-[9px] uppercase text-emerald-400 tracking-widest mb-1 flex items-center justify-center gap-1">
-                  <Target className="w-2.5 h-2.5" /> Target
-                </div>
-                <div className="font-bold text-sm text-emerald-400">{priceStr(signal.takeProfit)}</div>
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Live Indicator Grid */}
           {signal && (
@@ -765,6 +888,35 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
           )}
         </div>
       )}
+
+      {/* Bank Liquidity Sweep Interactive Pop-Up Dialog */}
+      <BankLiquidityPopUp
+        open={sweepPopUpOpen}
+        onOpenChange={setSweepPopUpOpen}
+        data={activeSweepData}
+        onExecuteTrade={() => {
+          if (activeSweepData) {
+            const matchedInst = instrumentsQuery.data?.find((i: any) => i.symbol === activeSweepData.symbol);
+            if (matchedInst && !placeTrade.isPending) {
+              placeTrade.mutate({
+                instrumentId: matchedInst.id,
+                side: activeSweepData.direction,
+                amount: user?.autoTradeAmount || "5.00",
+                strikePrice: String(activeSweepData.entryPrice),
+                durationSeconds: 60,
+                placedBy: "AI_BOT"
+              }, {
+                onSuccess: () => {
+                  toast({
+                    title: "⚡ Trade Followed Bank Liquidity Sweep!",
+                    description: `Placed ${activeSweepData.direction} trade @ $${activeSweepData.entryPrice.toLocaleString()}`,
+                  });
+                }
+              });
+            }
+          }
+        }}
+      />
     </div>
   );
 }

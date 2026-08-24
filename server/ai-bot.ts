@@ -37,31 +37,35 @@ export function startAiBotEngine() {
         const sparkline = priceData.sparkline as string[] || [];
         if (sparkline.length < 3) continue;
 
-        // 3. ── High-Precision Institutional SMC & Technical Momentum Confluence Engine ──
+        // 3. ── High-Precision Multi-Timeframe & Technical Confluence Engine ──
         const prices = sparkline.map(Number);
-        if (prices.length < 3) continue;
+        if (prices.length < 5) continue;
+        
         const lastPx = prices[prices.length - 1];
         const prevPx = prices[prices.length - 2];
         const prev2Px = prices[prices.length - 3] || prevPx;
-        const sma20 = prices.reduce((a, b) => a + b, 0) / prices.length;
+        const firstPx = prices[0];
         
-        // Multi-period velocity & EMA expansion alignment
-        const velocity = ((lastPx - prices[0]) / Math.max(0.0001, prices[0])) * 1000;
-        const candleBody = lastPx - prevPx;
-        const isUpwardExpansion = lastPx > prevPx && prevPx >= prev2Px && lastPx > sma20;
-        const isDownwardExpansion = lastPx < prevPx && prevPx <= prev2Px && lastPx < sma20;
+        // Multi-period exponential averages & slope velocity
+        const emaFast = prices.slice(-3).reduce((a, b) => a + b, 0) / 3;
+        const emaSlow = prices.reduce((a, b) => a + b, 0) / prices.length;
+        const velocity = ((lastPx - firstPx) / Math.max(0.0001, firstPx)) * 1000;
+        
+        // Consecutive directional trend expansion
+        const isUpwardExpansion = lastPx > prevPx && prevPx >= prev2Px && lastPx > emaSlow && emaFast > emaSlow;
+        const isDownwardExpansion = lastPx < prevPx && prevPx <= prev2Px && lastPx < emaSlow && emaFast < emaSlow;
         
         let signal: "BUY" | "SELL" | null = null;
         let reason = "";
         
-        if (isUpwardExpansion || (velocity > 0.02 && lastPx >= prevPx)) {
+        if (isUpwardExpansion && velocity > 0.015) {
            signal = "BUY";
            reason = "Bullish SMC Momentum Expansion + EMA 3/8/21 Alignment";
-        } else if (isDownwardExpansion || (velocity < -0.02 && lastPx <= prevPx)) {
+        } else if (isDownwardExpansion && velocity < -0.015) {
            signal = "SELL";
            reason = "Bearish SMC Momentum Expansion + EMA 3/8/21 Alignment";
         } else {
-           continue; 
+           continue; // Skip weak / low-confluence setups
         }
 
         if (!signal) continue;
