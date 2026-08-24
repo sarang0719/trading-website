@@ -551,6 +551,34 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
     }
     if (bbSqueeze && dir !== "HOLD") reasons.push("⚠️ BB Squeeze: Low volatility expansion phase");
 
+    // High-Precision Institutional Bank Entry Level (SMC / Liquidity Sweep / OTE 61.8%)
+    let instEntryPrice = cd.close;
+    if (dir === "BUY") {
+      if (sweptLo && supLevel !== null) {
+        instEntryPrice = Math.min(cd.low, supLevel);
+      } else if (sweptLo) {
+        instEntryPrice = cd.low;
+      } else if (nearSup && supLevel !== null) {
+        instEntryPrice = supLevel;
+      } else if (nearFib618) {
+        instEntryPrice = fib618;
+      } else {
+        instEntryPrice = cd.low + range * 0.382; // Optimal Trade Entry (OTE 61.8% discount)
+      }
+    } else if (dir === "SELL") {
+      if (sweptHi && resLevel !== null) {
+        instEntryPrice = Math.max(cd.high, resLevel);
+      } else if (sweptHi) {
+        instEntryPrice = cd.high;
+      } else if (nearRes && resLevel !== null) {
+        instEntryPrice = resLevel;
+      } else if (nearFib382) {
+        instEntryPrice = fib382;
+      } else {
+        instEntryPrice = cd.high - range * 0.382; // Optimal Trade Entry (OTE 61.8% premium)
+      }
+    }
+
     signals.push({
       time: cd.time,
       direction: dir,
@@ -564,7 +592,7 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
       rsiVal: rv, stochK: sk, atr,
       supLevel, resLevel, fib618, fib382,
       vwapVal, bbUpper, bbLower, bbMid,
-      entryPrice: cd.close,
+      entryPrice: Number(instEntryPrice.toFixed(4)),
       stopLoss:   sl,
       takeProfit: tp,
       trailingStop: atr * c.tslMult,

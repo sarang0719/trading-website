@@ -229,21 +229,23 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
         // --- BANK LIQUIDITY SWEEP POP-UP & TOAST TRIGGER ---
         if (currentSignal && (currentSignal.sweptLo || currentSignal.sweptHi)) {
           const sweepKey = `${symUpper}-${currentSignal.time}-${currentSignal.sweptLo ? "LO" : "HI"}`;
+          
+          const sweepData: BankLiquiditySweepData = {
+            symbol: symUpper,
+            direction: currentSignal.direction as "BUY" | "SELL",
+            entryPrice: currentSignal.entryPrice,
+            stopLoss: currentSignal.stopLoss,
+            takeProfit: currentSignal.takeProfit,
+            supLevel: currentSignal.supLevel,
+            resLevel: currentSignal.resLevel,
+            sweptLo: currentSignal.sweptLo,
+            sweptHi: currentSignal.sweptHi,
+            time: currentSignal.time,
+          };
+          setActiveSweepData(sweepData);
+
           if (lastSweepKeyRef.current !== sweepKey) {
             lastSweepKeyRef.current = sweepKey;
-            const sweepData: BankLiquiditySweepData = {
-              symbol: symUpper,
-              direction: currentSignal.direction as "BUY" | "SELL",
-              entryPrice: currentSignal.entryPrice,
-              stopLoss: currentSignal.stopLoss,
-              takeProfit: currentSignal.takeProfit,
-              supLevel: currentSignal.supLevel,
-              resLevel: currentSignal.resLevel,
-              sweptLo: currentSignal.sweptLo,
-              sweptHi: currentSignal.sweptHi,
-              time: currentSignal.time,
-            };
-            setActiveSweepData(sweepData);
             setSweepPopUpOpen(true);
 
             const slDiff = Math.abs(currentSignal.entryPrice - currentSignal.stopLoss);

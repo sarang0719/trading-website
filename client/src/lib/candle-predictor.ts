@@ -468,9 +468,34 @@ export function predictNextCandle(
   const slDist = Math.max(isGoldSymbol ? (candleSeconds >= 3600 ? 10.00 : candleSeconds >= 900 ? 5.00 : 2.50) : 1.50, atrVal * slMult);
 
   const isBuySignal = direction === "BUY";
-  const entryPrice = Number(c.close.toFixed(2));
-  const targetPrice = Number((isBuySignal ? c.close + tpDist : c.close - tpDist).toFixed(2));
-  const stopLossPrice = Number((isBuySignal ? c.close - slDist : c.close + slDist).toFixed(2));
+
+  // High-Precision Institutional Bank Entry Level (Order Block Mitigation / FVG / Wick Liquidity Sweep)
+  let rawInstEntry = c.close;
+  if (isBuySignal) {
+    if (activeOB) {
+      rawInstEntry = (activeOB.bottom + activeOB.top) / 2; // Order Block Equilibrium 50%
+    } else if (activeFVG) {
+      rawInstEntry = activeFVG.bottom; // FVG origin gap
+    } else if (lowerWickRatio > 0.25) {
+      rawInstEntry = c.low; // Liquidity sweep low spike
+    } else {
+      rawInstEntry = c.low + rangeC * 0.382; // OTE 61.8% Discount
+    }
+  } else {
+    if (activeOB) {
+      rawInstEntry = (activeOB.bottom + activeOB.top) / 2; // Order Block Equilibrium 50%
+    } else if (activeFVG) {
+      rawInstEntry = activeFVG.top; // FVG origin gap
+    } else if (upperWickRatio > 0.25) {
+      rawInstEntry = c.high; // Liquidity sweep high spike
+    } else {
+      rawInstEntry = c.high - rangeC * 0.382; // OTE 61.8% Premium
+    }
+  }
+
+  const entryPrice = Number(rawInstEntry.toFixed(2));
+  const targetPrice = Number((isBuySignal ? rawInstEntry + tpDist : rawInstEntry - tpDist).toFixed(2));
+  const stopLossPrice = Number((isBuySignal ? rawInstEntry - slDist : rawInstEntry + slDist).toFixed(2));
 
   return {
     direction,

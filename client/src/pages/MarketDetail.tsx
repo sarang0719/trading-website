@@ -2397,8 +2397,8 @@ export default function MarketDetail() {
                               <div className="font-black text-xs tracking-tight flex items-center gap-1.5 text-amber-300 group-hover:text-amber-200">
                                 ⚡ LIVE ALERT: BANK ENTERING TO COLLECT STOP-LOSS
                               </div>
-                              <div className="text-[10px] text-amber-400/80">
-                                Institutional Liquidity Grab Active · Reversal Bias: <span className="font-bold">{isBuy ? "BUY (UP)" : "SELL (DOWN)"}</span>
+                              <div className="text-[10px] text-amber-400/90 font-medium">
+                                Institutional Entry: <span className="font-mono font-bold text-amber-200">${epVal.toLocaleString()}</span> · Bias: <span className="font-bold text-emerald-300">{isBuy ? "BUY (UP)" : "SELL (DOWN)"}</span>
                               </div>
                             </div>
                           </div>

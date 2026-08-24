@@ -32,15 +32,61 @@ interface Props {
 export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }: Props) {
   if (!data) return null;
 
-  const { symbol, direction, entryPrice, stopLoss, takeProfit, supLevel, resLevel, sweptLo, sweptHi } = data;
+  const { symbol, direction, entryPrice: initialEntryPrice, stopLoss: initialStopLoss, takeProfit: initialTakeProfit, supLevel, resLevel, sweptLo, sweptHi } = data;
 
+  const [liveEntryPrice, setLiveEntryPrice] = React.useState<number>(initialEntryPrice);
+  const [lastUpdatedTime, setLastUpdatedTime] = React.useState<string>("");
+
+  // Sync initial entry price when data changes
+  React.useEffect(() => {
+    setLiveEntryPrice(initialEntryPrice);
+    setLastUpdatedTime(new Date().toLocaleTimeString());
+  }, [data, initialEntryPrice]);
+
+  // Live Auto-Refresh Ticker Engine (1.5s interval while popup is open)
+  React.useEffect(() => {
+    if (!open || !symbol) return;
+
+    let isMounted = true;
+    const fetchLatestPrice = async () => {
+      try {
+        const symUpper = symbol.toUpperCase();
+        const res = await fetch(`/api/market-data/price/${symUpper}`);
+        if (res.ok && isMounted) {
+          const json = await res.json();
+          if (json && json.price) {
+            const parsed = parseFloat(json.price);
+            if (!isNaN(parsed) && parsed > 0) {
+              setLiveEntryPrice(parsed);
+              setLastUpdatedTime(new Date().toLocaleTimeString());
+            }
+          }
+        }
+      } catch (err) {
+        // Fallback silently if offline or rate limited
+      }
+    };
+
+    // Initial immediate fetch
+    fetchLatestPrice();
+
+    const intervalId = setInterval(fetchLatestPrice, 1500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [open, symbol]);
+
+  const entryPrice = liveEntryPrice || initialEntryPrice;
   const isBuy = direction === "BUY";
   const symUpper = symbol.toUpperCase();
   const isForex = symUpper.includes("EUR") || symUpper.includes("GBP") || (symUpper.includes("USD") && !symUpper.includes("XAU") && !symUpper.includes("BTC") && !symUpper.includes("ETH") && symUpper.length === 6);
   const isGold = symUpper.includes("XAU");
 
-  const slDiff = Math.abs(entryPrice - stopLoss);
-  const tpDiff = Math.abs(takeProfit - entryPrice);
+  // Dynamic calculation based on live updated entry price
+  const slDiff = Math.abs(entryPrice - initialStopLoss);
+  const tpDiff = Math.abs(initialTakeProfit - entryPrice);
 
   let ptsStr = "";
   let pipsStr = "";
@@ -71,24 +117,34 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
     : "Institutional Liquidity Hunt";
 
   const targetLevel = sweptLo
-    ? (supLevel ? `$${supLevel.toLocaleString()}` : `$${stopLoss.toLocaleString()}`)
-    : (resLevel ? `$${resLevel.toLocaleString()}` : `$${stopLoss.toLocaleString()}`);
+    ? (supLevel ? `$${supLevel.toLocaleString()}` : `$${initialStopLoss.toLocaleString()}`)
+    : (resLevel ? `$${resLevel.toLocaleString()}` : `$${initialStopLoss.toLocaleString()}`);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md bg-zinc-950/95 border-2 border-amber-500/40 text-white shadow-2xl backdrop-blur-xl rounded-2xl p-6">
         <DialogHeader className="space-y-3 text-center sm:text-left">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
-              <Landmark className="w-6 h-6" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 animate-pulse">
+                <Landmark className="w-6 h-6" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-black tracking-tight text-amber-400 flex items-center gap-1.5">
+                  ⚡ Bank Liquidity Sweep Alert!
+                </DialogTitle>
+                <DialogDescription className="text-xs text-amber-200/70">
+                  Institutional Stop-Loss Collection Engine
+                </DialogDescription>
+              </div>
             </div>
-            <div>
-              <DialogTitle className="text-lg font-black tracking-tight text-amber-400 flex items-center gap-1.5">
-                ⚡ Bank Liquidity Sweep Alert!
-              </DialogTitle>
-              <DialogDescription className="text-xs text-amber-200/70">
-                Institutional Stop-Loss Collection Engine
-              </DialogDescription>
+            {/* Live Auto Refresh Status Badge */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/40 text-[10px] font-mono text-emerald-400">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              <span>LIVE AUTO-REFRESH</span>
             </div>
           </div>
         </DialogHeader>
@@ -104,6 +160,20 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
                 {isBuy ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
                 {direction} REVERSAL
               </span>
+            </div>
+
+            {/* Institutional Entry vs Live Market Entry Dual Data Box */}
+            <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-lg border border-amber-500/30 text-xs">
+              <div className="flex flex-col">
+                <span className="text-[10px] text-amber-400/90 uppercase font-bold tracking-wider">Institutional Bank Entry</span>
+                <span className="font-mono font-black text-amber-300 text-sm">${initialEntryPrice.toLocaleString()}</span>
+              </div>
+              <div className="flex flex-col text-right">
+                <span className="text-[10px] text-emerald-400/90 uppercase font-bold tracking-wider flex items-center justify-end gap-1">
+                  Live Market Entry <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                </span>
+                <span className="font-mono font-black text-emerald-400 text-sm">${entryPrice.toLocaleString()}</span>
+              </div>
             </div>
 
             <div className="border-t border-amber-500/20 pt-2 flex items-center justify-between text-xs">
@@ -145,17 +215,24 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
               <span className="text-zinc-400">Targeted Liquidity Level:</span>
               <span className="font-mono font-bold text-amber-400">{targetLevel}</span>
             </div>
+            <div className="flex justify-between items-center bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">
+              <span className="text-amber-300 font-bold">Institutional Entry Level:</span>
+              <span className="font-mono font-black text-amber-300 text-xs">${initialEntryPrice.toLocaleString()}</span>
+            </div>
             <div className="flex justify-between items-center">
-              <span className="text-zinc-400">Institutional Entry Level:</span>
-              <span className="font-mono font-bold text-white">${entryPrice.toLocaleString()}</span>
+              <span className="text-zinc-400 flex items-center gap-1">
+                Current Updated Entry:
+                <span className="text-[9px] text-emerald-400 animate-pulse font-semibold">(Live)</span>
+              </span>
+              <span className="font-mono font-bold text-emerald-400">${entryPrice.toLocaleString()}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-zinc-400">Suggested Stop Loss:</span>
-              <span className="font-mono font-bold text-rose-400">${stopLoss.toLocaleString()}</span>
+              <span className="font-mono font-bold text-rose-400">${initialStopLoss.toLocaleString()}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-zinc-400">Target Take Profit (+{tpPtsStr}):</span>
-              <span className="font-mono font-bold text-emerald-400">${takeProfit.toLocaleString()}</span>
+              <span className="font-mono font-bold text-emerald-400">${initialTakeProfit.toLocaleString()}</span>
             </div>
           </div>
 
@@ -163,7 +240,7 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
           <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-[11px] text-amber-200/80 leading-relaxed flex items-start gap-2">
             <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <strong>Bank Order Flow Insight:</strong> Commercial banks swept retail stop-loss orders around <span className="font-mono text-amber-300">{targetLevel}</span>, creating a liquidity imbalance. Price is expected to push towards <span className="font-mono text-emerald-300">${takeProfit.toLocaleString()}</span> (+{tpPtsStr} / {tpPipsStr}).
+              <strong>Bank Order Flow Insight:</strong> Commercial banks swept retail stop-loss orders around <span className="font-mono text-amber-300">{targetLevel}</span>. Live Entry updated at <span className="font-mono text-emerald-300 font-bold">${entryPrice.toLocaleString()}</span> ({lastUpdatedTime}). Target <span className="font-mono text-emerald-300">${initialTakeProfit.toLocaleString()}</span> (+{tpPtsStr} / {tpPipsStr}).
             </div>
           </div>
         </div>
