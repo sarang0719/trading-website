@@ -209,6 +209,37 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
             </div>
           </div>
 
+          {/* Static Live Bank Data Box (Unchanged until updated) */}
+          <div className="bg-amber-950/60 border-2 border-amber-400/60 rounded-xl p-3.5 space-y-2 text-xs shadow-lg relative overflow-hidden">
+            <div className="flex items-center justify-between border-b border-amber-500/30 pb-2">
+              <span className="font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                🏛️ Live Bank Data (Static Level)
+              </span>
+              <span className="bg-amber-400/20 text-amber-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-amber-400/40">
+                🔒 LOCKED (STATIC)
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="bg-black/60 p-2 rounded border border-amber-500/20">
+                <div className="text-[10px] text-amber-400/80 font-bold uppercase">Bank Entry Level</div>
+                <div className="font-mono font-black text-amber-300 text-sm mt-0.5">
+                  ${initialEntryPrice.toLocaleString()}
+                </div>
+              </div>
+              <div className="bg-black/60 p-2 rounded border border-amber-500/20">
+                <div className="text-[10px] text-amber-400/80 font-bold uppercase">Targeted Sweep Zone</div>
+                <div className="font-mono font-black text-amber-300 text-sm mt-0.5">
+                  {targetLevel}
+                </div>
+              </div>
+            </div>
+
+            <div className="text-[10px] text-amber-200/70 font-medium italic pt-0.5">
+              ✓ This Bank Level is locked and will never change before a new institutional signal is updated.
+            </div>
+          </div>
+
           {/* Level Details */}
           <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3.5 space-y-2 text-xs">
             <div className="flex justify-between items-center">
