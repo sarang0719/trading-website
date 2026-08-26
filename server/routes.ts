@@ -518,7 +518,7 @@ export async function registerRoutes(
       // Forward to FastAPI (running on port 8000 by default)
       const pythonAiUrl = process.env.PYTHON_AI_URL || "http://127.0.0.1:8000";
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
+      const timeout = setTimeout(() => controller.abort(), 8000);
 
       const response = await fetch(`${pythonAiUrl}/api/predict`, {
         method: "POST",

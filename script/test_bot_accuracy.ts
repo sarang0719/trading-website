@@ -26,19 +26,11 @@ async function test1HAtrPerformance() {
       const windowSoFar = candles1h.slice(0, i + 1);
       const pred = predictNextCandle(windowSoFar, 3600, undefined, "XAUUSD");
 
-      if (pred.isConfirmed && (pred.confluenceScore ?? 0) >= 18) {
+      if (pred.isConfirmed && (pred.confluenceScore ?? 0) >= 65) {
         const isBuy = pred.direction === "BUY";
-        const entryPrice = candles1h[i].close;
-
-        let atrSum = 0;
-        for (let k = i - 14; k <= i; k++) {
-          atrSum += Math.max(2.0, candles1h[k].high - candles1h[k].low);
-        }
-        const atr = atrSum / 14;
-
-        // 1:1 Risk to Reward on 1H (e.g. +$12.00 TP vs -$12.00 SL)
-        const tpPrice = isBuy ? entryPrice + (atr * 1.2) : entryPrice - (atr * 1.2);
-        const slPrice = isBuy ? entryPrice - (atr * 1.2) : entryPrice + (atr * 1.2);
+        const entryPrice = pred.entryPrice || candles1h[i].close;
+        const tpPrice = pred.targetPrice || (isBuy ? entryPrice + 12.0 : entryPrice - 12.0);
+        const slPrice = pred.stopLossPrice || (isBuy ? entryPrice - 8.0 : entryPrice + 8.0);
 
         totalSignals++;
 

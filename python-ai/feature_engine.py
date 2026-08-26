@@ -79,11 +79,13 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
         df['BB_Mid'] = bbands.iloc[:, 1]
         df['BB_Upper'] = bbands.iloc[:, 2]
         
-    # -- Stochastic RSI
-    stoch_rsi = ta.stochrsi(df['close'])
-    if stoch_rsi is not None and not stoch_rsi.empty:
-        df['STOCHRSI_K'] = stoch_rsi.iloc[:, 0]
-        df['STOCHRSI_D'] = stoch_rsi.iloc[:, 1]
+    # -- Stochastic RSI (Ultra-Fast Vectorized)
+    rsi = df['RSI']
+    rsi_min = rsi.rolling(14, min_periods=1).min()
+    rsi_max = rsi.rolling(14, min_periods=1).max()
+    rsi_diff = (rsi_max - rsi_min).replace(0, 0.0001)
+    df['STOCHRSI_K'] = ((rsi - rsi_min) / rsi_diff) * 100
+    df['STOCHRSI_D'] = df['STOCHRSI_K'].rolling(3, min_periods=1).mean()
         
     roc_calc = ta.roc(df['close'], length=min(14, n_candles))
     if roc_calc is not None and not roc_calc.empty:
@@ -133,19 +135,21 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     bear_engulf = (df['close'] < df['open']) & (prev_close > prev_open) & (df['close'] <= prev_open) & (df['open'] >= prev_close)
     df['CDL_ENGULFING'] = np.where(bull_engulf, 100, np.where(bear_engulf, -100, 0))
             
-    # -- Stochastic Oscillator
-    stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
-    if stoch is not None and not stoch.empty:
-        df['STOCH_K'] = stoch.iloc[:, 0]
-        df['STOCH_D'] = stoch.iloc[:, 1]
+    # -- Stochastic Oscillator (Ultra-Fast Vectorized)
+    low_14 = df['low'].rolling(14, min_periods=1).min()
+    high_14 = df['high'].rolling(14, min_periods=1).max()
+    stoch_diff = (high_14 - low_14).replace(0, 0.0001)
+    df['STOCH_K'] = ((df['close'] - low_14) / stoch_diff) * 100
+    df['STOCH_D'] = df['STOCH_K'].rolling(3, min_periods=1).mean()
 
-    # -- Keltner Channels
-    kc = ta.kc(df['high'], df['low'], df['close'], length=20, scalar=2.0)
-    if kc is not None and not kc.empty:
-        df['KC_Lower'] = kc.iloc[:, 0]
-        df['KC_Mid'] = kc.iloc[:, 1]
-        df['KC_Upper'] = kc.iloc[:, 2]
-        df['KC_Pos'] = np.where(df['KC_Upper'] > df['KC_Lower'], (df['close'] - df['KC_Lower']) / (df['KC_Upper'] - df['KC_Lower']), 0.5)
+    # -- Keltner Channels (Ultra-Fast Vectorized)
+    tp = (df['high'] + df['low'] + df['close']) / 3.0
+    kc_mid = ta.ema(tp, length=min(20, n_candles))
+    df['KC_Mid'] = kc_mid if kc_mid is not None else tp
+    df['KC_Upper'] = df['KC_Mid'] + (2.0 * df['ATR'])
+    df['KC_Lower'] = df['KC_Mid'] - (2.0 * df['ATR'])
+    kc_diff = (df['KC_Upper'] - df['KC_Lower']).replace(0, 0.0001)
+    df['KC_Pos'] = (df['close'] - df['KC_Lower']) / kc_diff
 
     # -- Pivot Points (Classic relative distance)
     prev_h = df['high'].shift(1)

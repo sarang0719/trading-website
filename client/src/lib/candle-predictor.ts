@@ -142,25 +142,84 @@ function supertrendArr(candles: Candle[], factor: number, len: number): number[]
 
 // ─── SMC Institutional Engines ───────────────────────────────────────────────
 
-function detectOB(src: Candle[], atr: number[], isGold = false): { bull: any; bear: any } {
-  const n = src.length - 1;
-  let bull: any = null, bear: any = null;
-  const bullThresh = isGold ? 1.0003 : 1.0006;
-  const bearThresh = isGold ? 0.9997 : 0.9994;
-  const minBodyMult = isGold ? 0.35 : 0.42;
+// ─── SMC Institutional Engines ───────────────────────────────────────────────
 
-  for (let i = 1; i < Math.min(15, n); i++) {
-    const c0 = src[n - i + 1], c1 = src[n - i];
+export interface OrderBlockZone {
+  top: number;
+  bottom: number;
+  type: "BULL" | "BEAR";
+  equilibrium: number;
+  strength: number;
+  unmitigated: boolean;
+}
+
+export interface LiquidityPool {
+  level: number;
+  type: "BSL" | "SSL"; // Buy-side liquidity (swing high / EQH) or Sell-side liquidity (swing low / EQL)
+  swept: boolean;
+  sweepPrice?: number;
+}
+
+function detectOB(src: Candle[], atr: number[], isGold = false): { bull: OrderBlockZone | null; bear: OrderBlockZone | null } {
+  const n = src.length - 1;
+  let bull: OrderBlockZone | null = null, bear: OrderBlockZone | null = null;
+  const bullThresh = isGold ? 1.0002 : 1.0005;
+  const bearThresh = isGold ? 0.9998 : 0.9995;
+  const minBodyMult = isGold ? 0.35 : 0.40;
+
+  for (let i = 1; i < Math.min(20, n); i++) {
+    const idx = n - i;
+    const c0 = src[idx + 1], c1 = src[idx];
     if (!c0 || !c1) continue;
-    const atrV = atr[n - i + 1] || 1;
-    if (!bull && c0.close > c1.close * bullThresh && Math.abs(c0.close - c0.open) > atrV * minBodyMult && c1.close <= c1.open)
-      bull = { top: Math.max(c1.open, c1.close), bottom: Math.min(c1.open, c1.close), type: "BULL" };
-    if (!bear && c0.close < c1.close * bearThresh && Math.abs(c0.close - c0.open) > atrV * minBodyMult && c1.close >= c1.open)
-      bear = { top: Math.max(c1.open, c1.close), bottom: Math.min(c1.open, c1.close), type: "BEAR" };
+    const atrV = atr[idx] || Math.max(0.0001, c1.high - c1.low);
+
+    // Bullish Bank Push Zone: Last bearish/small candle before strong institutional displacement breakout
+    if (!bull && c0.close > c1.close * bullThresh && (c0.close - c0.open) > atrV * minBodyMult) {
+      const obTop = Math.max(c1.open, c1.close);
+      const obBottom = c1.low; // include wick for true institutional bank defense
+      const eq = (obTop + obBottom) / 2;
+      bull = { top: obTop, bottom: obBottom, equilibrium: eq, type: "BULL", strength: 85, unmitigated: true };
+    }
+
+    // Bearish Bank Push Zone: Last bullish/small candle before strong institutional displacement breakdown
+    if (!bear && c0.close < c1.close * bearThresh && (c1.open - c0.close) > atrV * minBodyMult) {
+      const obTop = c1.high; // include upper wick for bank supply zone
+      const obBottom = Math.min(c1.open, c1.close);
+      const eq = (obTop + obBottom) / 2;
+      bear = { top: obTop, bottom: obBottom, equilibrium: eq, type: "BEAR", strength: 85, unmitigated: true };
+    }
   }
-  if (bull && src[n].close < bull.bottom * 0.9995) bull = null;
-  if (bear && src[n].close > bear.top * 1.0005) bear = null;
+
+  // Mitigation check: if price broke through the bank zone, it's invalidated
+  if (bull && src[n].close < bull.bottom * 0.9992) bull = null;
+  if (bear && src[n].close > bear.top * 1.0008) bear = null;
+
   return { bull, bear };
+}
+
+function detectLiquidityPools(src: Candle[], atr: number[]): { bsl: LiquidityPool | null; ssl: LiquidityPool | null; sweptLo: boolean; sweptHi: boolean } {
+  const n = src.length - 1;
+  if (n < 15) return { bsl: null, ssl: null, sweptLo: false, sweptHi: false };
+
+  const atrV = atr[n] || 1;
+  const recentHighs = src.slice(n - 15, n).map(c => c.high);
+  const recentLows = src.slice(n - 15, n).map(c => c.low);
+
+  const swingHigh = Math.max(...recentHighs);
+  const swingLow = Math.min(...recentLows);
+
+  const current = src[n];
+
+  // Sell-Stop Liquidity (SSL) Sweep: Candle low breaks swing low (stop hunt), but close recovers back above swing low
+  const sweptLo = current.low < swingLow && current.close > swingLow;
+
+  // Buy-Stop Liquidity (BSL) Sweep: Candle high breaks swing high (stop hunt), but close drops back below swing high
+  const sweptHi = current.high > swingHigh && current.close < swingHigh;
+
+  const ssl: LiquidityPool = { level: swingLow, type: "SSL", swept: sweptLo, sweepPrice: sweptLo ? current.low : undefined };
+  const bsl: LiquidityPool = { level: swingHigh, type: "BSL", swept: sweptHi, sweepPrice: sweptHi ? current.high : undefined };
+
+  return { bsl, ssl, sweptLo, sweptHi };
 }
 
 function detectFVG(src: Candle[]): { bull: any; bear: any } {
@@ -274,10 +333,11 @@ export function predictNextCandle(
 
   const isGold = marketSymbol?.toUpperCase().includes("XAU") ?? false;
 
-  // ── SMC Structural Zones ──────────────────────────────────────────────────
+  // ── SMC Structural Zones & Liquidity Pools ─────────────────────────────────────
   const { bull: obBull, bear: obBear } = detectOB(src, atr7, isGold);
   const { bull: fvgBull, bear: fvgBear } = detectFVG(src);
   const { bos, choch } = detectStructure(src);
+  const { bsl, ssl, sweptLo, sweptHi } = detectLiquidityPools(src, atr7);
 
   let bullW = 0, bearW = 0;
   const factors: PredictionFactor[] = [];
@@ -288,12 +348,12 @@ export function predictNextCandle(
     factors.push({ name, vote: bull ? "BUY" : bear ? "SELL" : "NEUTRAL", weight, value });
   }
 
-  // 1. SMC Order Block & FVG Confluence [W=4]
-  const inBullZone = (obBull && c.low <= obBull.top * 1.001 && c.close >= obBull.bottom) || (fvgBull && c.low <= fvgBull.top);
-  const inBearZone = (obBear && c.high >= obBear.bottom * 0.999 && c.close <= obBear.top) || (fvgBear && c.high >= fvgBear.bottom);
+  // 1. SMC Order Block & Bank Push Zone Confluence [W=5]
+  const inBullZone = (obBull && c.low <= obBull.top * 1.001 && c.close >= obBull.bottom) || (fvgBull && c.low <= fvgBull.top) || sweptLo;
+  const inBearZone = (obBear && c.high >= obBear.bottom * 0.999 && c.close <= obBear.top) || (fvgBear && c.high >= fvgBear.bottom) || sweptHi;
   score("SMC Institutional Liquidity Zone", !!inBullZone, !!inBearZone, activeW.SMC_OB_FVG,
-    inBullZone ? "Price defending Bullish Order Block / FVG → Institutional Buyers" :
-      inBearZone ? "Price rejecting Bearish Order Block / FVG → Institutional Sellers" :
+    inBullZone ? (sweptLo ? "⚡ Sell-Stop Liquidity Swept (SSL) → Bank Buying Absorption" : "Price defending Bullish Bank Push Zone / OB") :
+      inBearZone ? (sweptHi ? "⚡ Buy-Stop Liquidity Swept (BSL) → Bank Selling Distribution" : "Price rejecting Bearish Bank Push Zone / OB") :
         "Mid-zone price action");
 
   // 2. Exhaustion Rejection & Liquidity Sweep Spike Engine [W=5]
@@ -302,12 +362,12 @@ export function predictNextCandle(
   const lowerWickRatio = lowerWick / rangeC;
   const upperWickRatio = upperWick / rangeC;
 
-  const isBullishExhaustion = (lowerWickRatio > 0.32 && (rsiV < 42 || bodyC >= -rangeC * 0.3)) || (rsiV < 26) || (inBullZone && lowerWickRatio > 0.28);
-  const isBearishExhaustion = (upperWickRatio > 0.32 && (rsiV > 58 || bodyC <= rangeC * 0.3)) || (rsiV > 74) || (inBearZone && upperWickRatio > 0.28);
+  const isBullishExhaustion = sweptLo || (lowerWickRatio > 0.32 && (rsiV < 42 || bodyC >= -rangeC * 0.3)) || (rsiV < 26) || (inBullZone && lowerWickRatio > 0.28);
+  const isBearishExhaustion = sweptHi || (upperWickRatio > 0.32 && (rsiV > 58 || bodyC <= rangeC * 0.3)) || (rsiV > 74) || (inBearZone && upperWickRatio > 0.28);
   
   score("Exhaustion & Liquidity Sweep Spike Engine", isBullishExhaustion, isBearishExhaustion, activeW.EXHAUSTION,
-    isBullishExhaustion ? `Lower wick sweep (${(lowerWickRatio * 100).toFixed(0)}%) + RSI ${rsiV.toFixed(1)} → Sudden UP Surge` :
-      isBearishExhaustion ? `Upper wick sweep (${(upperWickRatio * 100).toFixed(0)}%) + RSI ${rsiV.toFixed(1)} → Sudden DOWN Drop` :
+    isBullishExhaustion ? `Lower wick sweep (${(lowerWickRatio * 100).toFixed(0)}%) + SSL Swept → Bank Push UP` :
+      isBearishExhaustion ? `Upper wick sweep (${(upperWickRatio * 100).toFixed(0)}%) + BSL Swept → Bank Push DOWN` :
         "Balanced candle anatomy");
 
   // 3. Structure Break & Change of Character (BOS & CHoCH) [W=4]
@@ -353,6 +413,18 @@ export function predictNextCandle(
   score("MACD Histogram Flow", macdBull, macdBear, activeW.MACD_FLOW,
     macdBull ? "MACD momentum positive ↑" : "MACD momentum negative ↓");
 
+  // ── 9. Macro Trend (50 EMA vs 200 EMA & 200 EMA Price Alignment) ─────────
+  const ema50Arr = ema(closes, 50);
+  const ema200Arr = ema(closes, 200);
+  const ema50Val = ema50Arr[n] || c.close;
+  const ema200Val = ema200Arr[n] || c.close;
+  const macroTrend = (ema50Val >= ema200Val || c.close >= ema200Val) ? "BUY" : "SELL";
+  const macroBull = macroTrend === "BUY";
+  const macroBear = macroTrend === "SELL";
+
+  score("Institutional Macro Trend (EMA50/200)", macroBull, macroBear, 4,
+    macroBull ? "Bullish Macro Trend Alignment (Above EMA200)" : "Bearish Macro Trend Alignment (Below EMA200)");
+
   // ── Final Next-Candle Decision Engine (QUANTEDGE V12.1 ULTRA-STRICT) ──────
   // Gold is less volatile in raw % terms, so its exhaustion wicks and RSI extremes are tuned slightly tighter
   const requiredWickRatio = isGold ? 0.45 : 0.6;
@@ -362,27 +434,38 @@ export function predictNextCandle(
   const isExtremeBullishExhaustion = lowerWick > (bodyC >= 0 ? bodyC : -bodyC) * 2;
   const isExtremeBearishExhaustion = upperWick > (bodyC >= 0 ? bodyC : -bodyC) * 2;
 
-  const isPerfectBull = inBullZone && (rsiV <= rsiOversold || (lowerWick / rangeC > requiredWickRatio)) && isExtremeBullishExhaustion;
-  const isPerfectBear = inBearZone && (rsiV >= rsiOverbought || (upperWick / rangeC > requiredWickRatio)) && isExtremeBearishExhaustion;
-
-  // Strong Body Candle Momentum Sync: If candle has a solid body (> 40% of range), align direction to live price action momentum
-  const isSolidRed = c.close < c.open && (Math.abs(bodyC) / rangeC > 0.40);
-  const isSolidGreen = c.close > c.open && (Math.abs(bodyC) / rangeC > 0.40);
+  const isPerfectBull = (inBullZone || sweptLo) && (rsiV <= rsiOversold || (lowerWick / rangeC > requiredWickRatio)) && isExtremeBullishExhaustion;
+  const isPerfectBear = (inBearZone || sweptHi) && (rsiV >= rsiOverbought || (upperWick / rangeC > requiredWickRatio)) && isExtremeBearishExhaustion;
 
   let direction: "BUY" | "SELL";
   if (isPerfectBull) {
     direction = "BUY";
   } else if (isPerfectBear) {
     direction = "SELL";
-  } else if (isSolidRed && !inBullZone) {
-    direction = "SELL";
-  } else if (isSolidGreen && !inBearZone) {
+  } else if (bullW > bearW && (macroBull || inBullZone || sweptLo)) {
     direction = "BUY";
+  } else if (bearW > bullW && (macroBear || inBearZone || sweptHi)) {
+    direction = "SELL";
   } else {
-    direction = bullW > bearW ? "BUY" : (bearW > bullW ? "SELL" : (c.close >= src[Math.max(0, n - 1)].close ? "BUY" : "SELL"));
+    direction = macroTrend;
   }
 
-  const isConfirmed = isPerfectBull || isPerfectBear || (Math.max(bullW, bearW) >= MIN_SCORE);
+  // Quality Confirmation Thresholding: Requires 68%+ score or SMC Sweep/Exhaustion
+  const minQualityScore = Math.ceil(maxW * 0.68);
+  const isConfirmed = isPerfectBull || isPerfectBear || (direction === "BUY" ? (bullW >= minQualityScore && (macroBull || sweptLo || inBullZone)) : (bearW >= minQualityScore && (macroBear || sweptHi || inBearZone)));
+
+  // Dynamic SMC Risk/Reward Target Calculation
+  let entryPriceVal = c.close;
+  let stopLossPriceVal: number;
+  let targetPriceVal: number;
+
+  if (direction === "BUY") {
+    stopLossPriceVal = obBull ? Math.min(obBull.bottom - (atrV * 0.3), c.low - (atrV * 0.5)) : c.close - Math.max(atrV * 1.5, c.close * 0.003);
+    targetPriceVal = entryPriceVal + (Math.abs(entryPriceVal - stopLossPriceVal) * 1.6);
+  } else {
+    stopLossPriceVal = obBear ? Math.max(obBear.top + (atrV * 0.3), c.high + (atrV * 0.5)) : c.close + Math.max(atrV * 1.5, c.close * 0.003);
+    targetPriceVal = entryPriceVal - (Math.abs(stopLossPriceVal - entryPriceVal) * 1.6);
+  }
 
   // ── Real-Time Market Volatility Detector ────────────────────────────────────
   const recentRanges = src.slice(Math.max(0, n - 14), n + 1).map(x => x.high - x.low);
@@ -493,9 +576,9 @@ export function predictNextCandle(
     }
   }
 
-  const entryPrice = Number(rawInstEntry.toFixed(2));
-  const targetPrice = Number((isBuySignal ? rawInstEntry + tpDist : rawInstEntry - tpDist).toFixed(2));
-  const stopLossPrice = Number((isBuySignal ? rawInstEntry - slDist : rawInstEntry + slDist).toFixed(2));
+  entryPriceVal = Number(rawInstEntry.toFixed(2));
+  targetPriceVal = Number((isBuySignal ? rawInstEntry + tpDist : rawInstEntry - tpDist).toFixed(2));
+  stopLossPriceVal = Number((isBuySignal ? rawInstEntry - slDist : rawInstEntry + slDist).toFixed(2));
 
   return {
     direction,
@@ -507,15 +590,15 @@ export function predictNextCandle(
     generatedAt: Date.now(),
     forCandleAt: src[n].time + candleSeconds,
     isConfirmed,
-    confluenceScore: isConfirmed ? 23 : Math.max(bullW, bearW),
+    confluenceScore: rawConfluencePct,
     orderBlock: activeOB || null,
     fvg: activeFVG,
     bos: bos ?? null,
     choch: choch ?? null,
     backtestWinRate: isConfirmed ? probability : Math.max(78, Math.round(probability * 0.9)),
-    entryPrice,
-    targetPrice,
-    stopLossPrice,
+    entryPrice: entryPriceVal,
+    targetPrice: targetPriceVal,
+    stopLossPrice: stopLossPriceVal,
     isHighVolatility,
     volatilityRatio: Math.round(volatilityRatio * 10) / 10
   };

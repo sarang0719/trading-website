@@ -54,6 +54,9 @@ export interface StrategySignal {
   takeProfit: number;
   trailingStop: number;     // ATR-based trail distance
   riskReward: number;
+  bankZoneTop?: number;
+  bankZoneBottom?: number;
+  sweepTypeDetail?: string;
 }
 
 export interface BacktestTrade {
@@ -553,11 +556,21 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
 
     // High-Precision Institutional Bank Entry Level (SMC / Liquidity Sweep / OTE 61.8%)
     let instEntryPrice = cd.close;
+    let bTop: number | undefined = undefined;
+    let bBottom: number | undefined = undefined;
+    let sweepDetail: string | undefined = undefined;
+
     if (dir === "BUY") {
+      if (supLevel !== null) {
+        bBottom = supLevel - atr * 0.2;
+        bTop = supLevel + atr * 0.4;
+      }
       if (sweptLo && supLevel !== null) {
         instEntryPrice = Math.min(cd.low, supLevel);
+        sweepDetail = `Sell-Stop Liquidity Swept below $${supLevel.toFixed(2)} → Bank Absorption`;
       } else if (sweptLo) {
         instEntryPrice = cd.low;
+        sweepDetail = `Sell-Stop Liquidity Swept at $${cd.low.toFixed(2)} → Bank Absorption`;
       } else if (nearSup && supLevel !== null) {
         instEntryPrice = supLevel;
       } else if (nearFib618) {
@@ -566,10 +579,16 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
         instEntryPrice = cd.low + range * 0.382; // Optimal Trade Entry (OTE 61.8% discount)
       }
     } else if (dir === "SELL") {
+      if (resLevel !== null) {
+        bTop = resLevel + atr * 0.2;
+        bBottom = resLevel - atr * 0.4;
+      }
       if (sweptHi && resLevel !== null) {
         instEntryPrice = Math.max(cd.high, resLevel);
+        sweepDetail = `Buy-Stop Liquidity Swept above $${resLevel.toFixed(2)} → Bank Distribution`;
       } else if (sweptHi) {
         instEntryPrice = cd.high;
+        sweepDetail = `Buy-Stop Liquidity Swept at $${cd.high.toFixed(2)} → Bank Distribution`;
       } else if (nearRes && resLevel !== null) {
         instEntryPrice = resLevel;
       } else if (nearFib382) {
@@ -597,6 +616,9 @@ export function runEngine(candles: Candle[], cfg: EngineConfig = {}): StrategySi
       takeProfit: tp,
       trailingStop: atr * c.tslMult,
       riskReward: c.rr,
+      bankZoneTop: bTop ? Number(bTop.toFixed(4)) : undefined,
+      bankZoneBottom: bBottom ? Number(bBottom.toFixed(4)) : undefined,
+      sweepTypeDetail: sweepDetail,
     });
   }
 

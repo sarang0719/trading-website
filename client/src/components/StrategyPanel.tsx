@@ -152,7 +152,6 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
         raw = cached.data;
       } else {
         let res: Response;
-        let isTwelveData = !isCrypto;
         
         try {
           if (isCrypto) {
@@ -161,17 +160,8 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
               { signal: ctrl.signal }
             );
           } else {
-            // TwelveData Integration for Gold/Forex
-            let tdInt = ivl;
-            if (ivl.endsWith("m")) tdInt = ivl + "in";
-            else if (ivl === "1d") tdInt = "1day";
-            else if (ivl === "1w") tdInt = "1week";
-            
-            let tdSymbol = symUpper;
-            if (tdSymbol.length >= 6 && !tdSymbol.includes("/")) tdSymbol = tdSymbol.substring(0, 3) + "/" + tdSymbol.substring(3);
-            
             res = await fetch(
-              `https://api.twelvedata.com/time_series?symbol=${tdSymbol}&interval=${tdInt}&outputsize=500`,
+              `/api/market-data/history/${symUpper}?interval=${ivl}`,
               { signal: ctrl.signal }
             );
           }
@@ -201,15 +191,16 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             volume: parseFloat(d[5]),
           }));
         } else {
-          if (!data.values || !Array.isArray(data.values) || data.values.length === 0) throw new Error("No premium data returned");
-          raw = data.values.reverse().map((d: any) => ({
-            time:   new Date(d.datetime).getTime() / 1000,
+          const candleList = Array.isArray(data) ? data : (data.data || data.values || []);
+          if (!Array.isArray(candleList) || candleList.length === 0) throw new Error("No premium data returned");
+          raw = candleList.map((d: any) => ({
+            time:   typeof d.time === "number" ? d.time : new Date(d.datetime || d.time).getTime() / 1000,
             open:   parseFloat(d.open),
             high:   parseFloat(d.high),
             low:    parseFloat(d.low),
             close:  parseFloat(d.close),
             volume: parseFloat(d.volume || "0"),
-          }));
+          })).sort((a: any, b: any) => a.time - b.time);
         }
         
         cacheRef.current.set(cacheKey, { ts: Date.now(), data: raw });
@@ -241,6 +232,9 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             sweptLo: currentSignal.sweptLo,
             sweptHi: currentSignal.sweptHi,
             time: currentSignal.time,
+            bankZoneTop: currentSignal.bankZoneTop,
+            bankZoneBottom: currentSignal.bankZoneBottom,
+            sweepTypeDetail: currentSignal.sweepTypeDetail,
           };
           setActiveSweepData(sweepData);
 

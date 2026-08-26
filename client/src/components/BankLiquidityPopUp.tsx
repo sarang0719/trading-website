@@ -20,6 +20,9 @@ export interface BankLiquiditySweepData {
   sweptLo: boolean;
   sweptHi: boolean;
   time: number;
+  bankZoneTop?: number | null;
+  bankZoneBottom?: number | null;
+  sweepTypeDetail?: string | null;
 }
 
 interface Props {
@@ -213,7 +216,7 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
           <div className="bg-amber-950/60 border-2 border-amber-400/60 rounded-xl p-3.5 space-y-2 text-xs shadow-lg relative overflow-hidden">
             <div className="flex items-center justify-between border-b border-amber-500/30 pb-2">
               <span className="font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
-                🏛️ Live Bank Data (Static Level)
+                🏛️ Institutional Bank Push Zone
               </span>
               <span className="bg-amber-400/20 text-amber-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-amber-400/40">
                 🔒 LOCKED (STATIC)
@@ -235,8 +238,15 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
               </div>
             </div>
 
+            {data.bankZoneTop && data.bankZoneBottom && (
+              <div className="bg-amber-500/10 border border-amber-500/30 p-2 rounded text-[11px] font-mono text-amber-300 flex justify-between items-center">
+                <span>Defense Zone Range:</span>
+                <span className="font-bold">${data.bankZoneBottom.toLocaleString()} — ${data.bankZoneTop.toLocaleString()}</span>
+              </div>
+            )}
+
             <div className="text-[10px] text-amber-200/70 font-medium italic pt-0.5">
-              ✓ This Bank Level is locked and will never change before a new institutional signal is updated.
+              ✓ This Bank Push Level is locked and will never change before a new institutional signal is updated.
             </div>
           </div>
 
@@ -246,6 +256,12 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
               <span className="text-zinc-400">Targeted Liquidity Level:</span>
               <span className="font-mono font-bold text-amber-400">{targetLevel}</span>
             </div>
+            {data.sweepTypeDetail && (
+              <div className="flex justify-between items-center">
+                <span className="text-zinc-400">Sweep Action:</span>
+                <span className="font-mono font-bold text-amber-300 text-[11px]">{data.sweepTypeDetail}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">
               <span className="text-amber-300 font-bold">Institutional Entry Level:</span>
               <span className="font-mono font-black text-amber-300 text-xs">${initialEntryPrice.toLocaleString()}</span>
