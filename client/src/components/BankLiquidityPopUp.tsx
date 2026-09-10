@@ -33,21 +33,23 @@ interface Props {
 }
 
 export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }: Props) {
-  if (!data) return null;
+  const baseEntryPrice = data?.entryPrice ?? 0;
+  const symbol = data?.symbol ?? "";
 
-  const { symbol, direction, entryPrice: initialEntryPrice, stopLoss: initialStopLoss, takeProfit: initialTakeProfit, supLevel, resLevel, sweptLo, sweptHi } = data;
-
-  const [liveEntryPrice, setLiveEntryPrice] = React.useState<number>(initialEntryPrice);
+  const [liveEntryPrice, setLiveEntryPrice] = React.useState<number>(baseEntryPrice);
   const [lastUpdatedTime, setLastUpdatedTime] = React.useState<string>("");
 
   // Sync initial entry price when data changes
   React.useEffect(() => {
-    setLiveEntryPrice(initialEntryPrice);
-    setLastUpdatedTime(new Date().toLocaleTimeString());
-  }, [data, initialEntryPrice]);
+    if (data) {
+      setLiveEntryPrice(data.entryPrice);
+      setLastUpdatedTime(new Date().toLocaleTimeString());
+    }
+  }, [data]);
 
   // Live Auto-Refresh Ticker Engine (1.5s interval while popup is open)
   React.useEffect(() => {
+    if (!open || !symbol || !data) return;
     if (!open || !symbol) return;
 
     let isMounted = true;
@@ -79,8 +81,11 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
       isMounted = false;
       clearInterval(intervalId);
     };
-  }, [open, symbol]);
+  }, [open, symbol, data]);
 
+  if (!data) return null;
+
+  const { direction, entryPrice: initialEntryPrice, stopLoss: initialStopLoss, takeProfit: initialTakeProfit, supLevel, resLevel, sweptLo, sweptHi } = data;
   const entryPrice = liveEntryPrice || initialEntryPrice;
   const isBuy = direction === "BUY";
   const symUpper = symbol.toUpperCase();

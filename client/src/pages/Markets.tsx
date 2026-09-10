@@ -36,6 +36,7 @@ function MiniSparkline({ data, isUp }: { data: string[], isUp: boolean }) {
 
 const CATEGORIES = [
   { id: "ALL", label: "All Markets" },
+  { id: "BANKING", label: "Banking Sector 🏦" },
   { id: "FOREX", label: "Forex" },
   { id: "CRYPTO", label: "Crypto" },
   { id: "COMMODITIES", label: "Commodities" },
@@ -271,11 +272,12 @@ export default function Markets() {
         return false;
       }
       if (activeCategory === "ALL") { seen.add(i.symbol); return true; }
+      if (activeCategory === "BANKING"     && (i.assetClass === "BANKING" || ["JPM","BAC","GS","MS","WFC","C","XLF","HDFCBANK","ICICIBANK","SBIN","KOTAKBANK","AXISBANK","BANKBARODA","BANKNIFTY"].includes(i.symbol))) { seen.add(i.symbol); return true; }
       if (activeCategory === "CRYPTO"      && i.assetClass === "CRYPTO") { seen.add(i.symbol); return true; }
       if (activeCategory === "FOREX"       && i.assetClass === "FOREX"  && !["XAUUSD","XAGUSD","WTIUSD","BRENTUSD"].includes(i.symbol)) { seen.add(i.symbol); return true; }
       if (activeCategory === "OTC"         && i.exchange === "OTC") { seen.add(i.symbol); return true; }
       if (activeCategory === "COMMODITIES" && ["XAUUSD","XAGUSD","WTIUSD","BRENTUSD"].includes(i.symbol)) { seen.add(i.symbol); return true; }
-      if (activeCategory === "STOCKS"      && ["AAPL","TSLA","AMZN","GOOGL","MSFT","NVDA","META","NFLX"].includes(i.symbol)) { seen.add(i.symbol); return true; }
+      if (activeCategory === "STOCKS"      && (i.assetClass === "US_STOCK" || i.assetClass === "INDIAN_STOCK" || i.assetClass === "BANKING" || ["AAPL","TSLA","AMZN","GOOGL","MSFT","NVDA","META","NFLX"].includes(i.symbol))) { seen.add(i.symbol); return true; }
       return false;
     });
   }, [instruments.data, activeCategory, q]);

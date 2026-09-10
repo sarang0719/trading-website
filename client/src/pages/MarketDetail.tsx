@@ -443,6 +443,12 @@ export default function MarketDetail() {
     };
   }, [prediction, hasHighImpactNews, candlesRef.current?.length]);
 
+  // --- Sound Alert ON / OFF Toggle State ---
+  const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("quantedge_sound_enabled");
+    return saved !== null ? saved === "true" : false;
+  });
+
   // --- Real-Time Dual Spike (UP/DOWN) & Imminent Volatility Predictor Engine ---
   const [spikeAlert, setSpikeAlert] = useState<{ active: boolean; type: "DROP" | "SURGE" | "IMMINENT"; message: string; amount: number } | null>(null);
   const lastAlertTimeRef = useRef<number>(0);
@@ -488,38 +494,34 @@ export default function MarketDetail() {
       });
 
       // Play Alert Audio Sound (Sawtooth Drop Pitch vs Ascending Surge Pitch)
-      try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = isSuddenDrop ? "sawtooth" : "triangle";
-        
-        const startFreq = isSuddenDrop ? 560 : 350;
-        const endFreq = isSuddenDrop ? 240 : 700;
-        
-        osc.frequency.setValueAtTime(startFreq, audioCtx.currentTime);
-        osc.frequency.exponentialRampToValueAtTime(endFreq, audioCtx.currentTime + 0.45);
-        gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.45);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.45);
-      } catch {}
+      if (isSoundEnabled) {
+        try {
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = isSuddenDrop ? "sawtooth" : "triangle";
+          
+          const startFreq = isSuddenDrop ? 560 : 350;
+          const endFreq = isSuddenDrop ? 240 : 700;
+          
+          osc.frequency.setValueAtTime(startFreq, audioCtx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(endFreq, audioCtx.currentTime + 0.45);
+          gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.45);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.45);
+        } catch {}
+      }
 
       setTimeout(() => {
         setSpikeAlert(null);
       }, 10000);
     }
-  }, [displayPrice, candlesRef.current?.length, instrument?.symbol]);
+  }, [displayPrice, candlesRef.current?.length, instrument?.symbol, isSoundEnabled]);
 
   const [base1mCandles, setBase1mCandles] = useState<any[]>([]);
-
-  // --- Sound Alert ON / OFF Toggle State ---
-  const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem("quantedge_sound_enabled");
-    return saved !== null ? saved === "true" : true;
-  });
 
   // --- Browser Audio Context Auto-Unlock & Test Sound Engine ---
   useEffect(() => {

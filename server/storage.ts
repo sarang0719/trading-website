@@ -749,6 +749,22 @@ export class DatabaseStorage implements IStorage {
       { symbol: "GOOGL",    exchange: "NASDAQ",  name: "Alphabet Inc.", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "META",     exchange: "NASDAQ",  name: "Meta Platforms", assetClass: "US_STOCK" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
 
+      // BANKING SECTOR (US & INDIAN BANKING GIANTS)
+      { symbol: "JPM",        exchange: "NYSE",    name: "JPMorgan Chase & Co.", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/jpmorganchase.com" },
+      { symbol: "BAC",        exchange: "NYSE",    name: "Bank of America Corp.", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/bankofamerica.com" },
+      { symbol: "GS",         exchange: "NYSE",    name: "Goldman Sachs Group", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/goldmansachs.com" },
+      { symbol: "MS",         exchange: "NYSE",    name: "Morgan Stanley", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/morganstanley.com" },
+      { symbol: "WFC",        exchange: "NYSE",    name: "Wells Fargo & Co.", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/wellsfargo.com" },
+      { symbol: "C",          exchange: "NYSE",    name: "Citigroup Inc.", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: "https://logo.clearbit.com/citigroup.com" },
+      { symbol: "XLF",        exchange: "NYSE",    name: "Financial SPDR Banking ETF", assetClass: "BANKING" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
+      { symbol: "HDFCBANK",   exchange: "NSE",     name: "HDFC Bank Ltd.", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/hdfcbank.com" },
+      { symbol: "ICICIBANK",  exchange: "NSE",     name: "ICICI Bank Ltd.", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/icicibank.com" },
+      { symbol: "SBIN",       exchange: "NSE",     name: "State Bank of India", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/sbi.co.in" },
+      { symbol: "KOTAKBANK",  exchange: "NSE",     name: "Kotak Mahindra Bank", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/kotak.com" },
+      { symbol: "AXISBANK",   exchange: "NSE",     name: "Axis Bank Ltd.", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/axisbank.com" },
+      { symbol: "BANKBARODA", exchange: "NSE",     name: "Bank of Baroda", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: "https://logo.clearbit.com/bankofbaroda.in" },
+      { symbol: "BANKNIFTY",  exchange: "NSE",     name: "Nifty Bank Index ETF", assetClass: "BANKING" as any, currency: "INR", country: "IN", isActive: true, imageUrl: null },
+
       // ETFs
       { symbol: "SPY",      exchange: "NYSE",    name: "S&P 500 ETF", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
       { symbol: "QQQ",      exchange: "NASDAQ",  name: "Nasdaq Tracker", assetClass: "ETF" as any, currency: "USD", country: "US", isActive: true, imageUrl: null },
@@ -770,6 +786,20 @@ export class DatabaseStorage implements IStorage {
         else if (sym === "USDINR") base = 83.50;
         else if (sym === "USDPKR") base = 278.40;
         else if (sym === "USDJPY") base = 152.00;
+        else if (sym === "JPM") base = 205.40;
+        else if (sym === "BAC") base = 39.80;
+        else if (sym === "GS") base = 485.20;
+        else if (sym === "MS") base = 103.50;
+        else if (sym === "WFC") base = 57.10;
+        else if (sym === "C") base = 65.30;
+        else if (sym === "XLF") base = 44.50;
+        else if (sym === "HDFCBANK") base = 1642.50;
+        else if (sym === "ICICIBANK") base = 1225.80;
+        else if (sym === "SBIN") base = 815.00;
+        else if (sym === "KOTAKBANK") base = 1785.40;
+        else if (sym === "AXISBANK") base = 1172.30;
+        else if (sym === "BANKBARODA") base = 256.70;
+        else if (sym === "BANKNIFTY") base = 51250.00;
         else if (sym.includes("USD")) {
           if (inserted.assetClass === "FOREX") base = 1.05; // EURUSD, GBPUSD approx
           else base = 150;

@@ -102,7 +102,8 @@ export function startBackgroundTasks() {
         let sym = instrument.symbol;
         if (sym === "XAGUSD") sym = "SI=F";
         else if (sym === "WTIUSD") sym = "CL=F";
-        else if (instrument.assetClass === "INDIAN_STOCK") sym += ".NS";
+        else if (sym === "BANKNIFTY") sym = "^NSEBANK";
+        else if (instrument.assetClass === "INDIAN_STOCK" || instrument.country === "IN" || ["HDFCBANK","ICICIBANK","SBIN","KOTAKBANK","AXISBANK","BANKBARODA"].includes(sym)) sym += ".NS";
         else if (instrument.assetClass === "FOREX") sym = sym + "=X";
         
         const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=15m&range=5d`);
@@ -142,6 +143,50 @@ export function startBackgroundTasks() {
     sparklinesCache.set(instrumentId, line);
     return line;
   }
+
+  // ── IN-MEMORY BATCH WRITER & LOAD BALANCING ENGINE ──
+  interface PriceUpdateBatchItem {
+    instrumentId: number;
+    price: string;
+    changeAbs: string;
+    changePct: string;
+    sparkline: string[];
+    asOf: Date;
+    isOpen: boolean;
+  }
+
+  const priceBatchQueue = new Map<number, PriceUpdateBatchItem>();
+
+  function queuePriceUpdate(item: PriceUpdateBatchItem) {
+    priceBatchQueue.set(item.instrumentId, item);
+  }
+
+  // Flush batched updates every 500ms to eliminate SQL write locks & CPU spikes
+  setInterval(async () => {
+    if (priceBatchQueue.size === 0) return;
+    const itemsToUpdate = Array.from(priceBatchQueue.values());
+    priceBatchQueue.clear();
+
+    try {
+      await Promise.all(
+        itemsToUpdate.map((item) =>
+          db
+            .update(latestPrices)
+            .set({
+              price: item.price,
+              changeAbs: item.changeAbs,
+              changePct: item.changePct,
+              sparkline: item.sparkline,
+              asOf: item.asOf,
+              isOpen: item.isOpen,
+            })
+            .where(eq(latestPrices.instrumentId, item.instrumentId))
+        )
+      );
+    } catch (err) {
+      console.error("[Price Batch Writer Error]", err);
+    }
+  }, 500);
 
   let isBinanceGeoBlocked = false;
   
@@ -185,16 +230,15 @@ export function startBackgroundTasks() {
             
             const newSparkline = await updateCachedSparkline(instrument, price, changeAbs);
 
-            await db.update(latestPrices)
-              .set({
-                price: String(price),
-                changeAbs: String(changeAbs),
-                changePct: String(changePct),
-                sparkline: newSparkline,
-                asOf: new Date(),
-                isOpen: true 
-              })
-              .where(eq(latestPrices.instrumentId, instId));
+            queuePriceUpdate({
+              instrumentId: instId,
+              price: String(price),
+              changeAbs: String(changeAbs),
+              changePct: String(changePct),
+              sparkline: newSparkline,
+              asOf: new Date(),
+              isOpen: true
+            });
           }
         }
       } catch (err) { }
@@ -261,16 +305,15 @@ export function startBackgroundTasks() {
 
               const newSparkline = await updateCachedSparkline(instrument, price, changeAbs);
 
-              await db.update(latestPrices)
-                .set({
-                  price: String(price),
-                  changeAbs: String(changeAbs),
-                  changePct: String(changePct),
-                  sparkline: newSparkline,
-                  asOf: new Date(),
-                  isOpen: true 
-                })
-                .where(eq(latestPrices.instrumentId, instrument.id));
+              queuePriceUpdate({
+                instrumentId: instrument.id,
+                price: String(price),
+                changeAbs: String(changeAbs),
+                changePct: String(changePct),
+                sparkline: newSparkline,
+                asOf: new Date(),
+                isOpen: true
+              });
             }
           }
         }
@@ -326,35 +369,24 @@ export function startBackgroundTasks() {
           }
         }
 
-        if (!priceData && ["US_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
-          // Priority 0: Finnhub Quote API (Primary Institutional Feed)
-          try {
-            const fhRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${instrument.symbol}&token=${FINNHUB_API_KEY}`);
-            const fhData = await fhRes.json() as any;
-            if (fhData && fhData.c && fhData.c > 0 && !fhData.error) {
-              priceData = {
-                price: String(Number(fhData.c).toFixed(4)),
-                changeAbs: String(Number(fhData.d || 0).toFixed(4)),
-                changePct: String(Number(fhData.dp || 0).toFixed(2)),
-              };
-            }
-          } catch {}
+        if (!priceData && ["US_STOCK", "BANKING", "INDIAN_STOCK", "ETF", "MUTUAL_FUND"].includes(instrument.assetClass)) {
+          // Priority 0: Alpha Vantage Banking API
+          if (bgTick % 4 === 0) {
+            try {
+              const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${instrument.symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`);
+              const data = await res.json() as any;
+              if (data && data["Global Quote"] && data["Global Quote"]["05. price"]) {
+                priceData = {
+                  price: String(data["Global Quote"]["05. price"]),
+                  changeAbs: String(data["Global Quote"]["09. change"]),
+                  changePct: String(data["Global Quote"]["10. change percent"].replace("%", "")),
+                };
+              }
+            } catch {}
+          }
 
-          // Priority 1: Alpha Vantage (Primary Stock Feed)
-          try {
-            const res = await fetch(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${instrument.symbol}&apikey=${ALPHA_VANTAGE_API_KEY}`);
-            const data = await res.json() as any;
-            if (data && data["Global Quote"] && data["Global Quote"]["05. price"]) {
-              priceData = {
-                price: String(data["Global Quote"]["05. price"]),
-                changeAbs: String(data["Global Quote"]["09. change"]),
-                changePct: String(data["Global Quote"]["10. change percent"].replace("%", "")),
-              };
-            }
-          } catch {}
-
-          // Priority 1: TwelveData Fallback
-          if (!priceData) {
+          // Priority 1: TwelveData Banking API
+          if (!priceData && (bgTick % 3 === 0)) {
             try {
               const res = await fetch(`https://api.twelvedata.com/price?symbol=${instrument.symbol}&apikey=${TWELVEDATA_API_KEY}`);
               const data = await res.json() as any;
@@ -363,13 +395,30 @@ export function startBackgroundTasks() {
               }
             } catch {}
           }
+
+          // Priority 2: Finnhub Rate-Limited Quote API
+          if (!priceData && (bgTick % 6 === 0)) {
+            try {
+              const fhRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${instrument.symbol}&token=${FINNHUB_API_KEY}`);
+              const fhData = await fhRes.json() as any;
+              if (fhData && fhData.c && fhData.c > 0 && !fhData.error) {
+                priceData = {
+                  price: String(Number(fhData.c).toFixed(4)),
+                  changeAbs: String(Number(fhData.d || 0).toFixed(4)),
+                  changePct: String(Number(fhData.dp || 0).toFixed(2)),
+                };
+              }
+            } catch {}
+          }
         }
 
-        // Priority 2: Yahoo Finance Universal Live Proxy (Zero Rate Limit for Stocks & Forex)
+        // Priority 2: Yahoo Finance Universal Live Proxy (Zero Rate Limit for Stocks, Forex & Indian Banking)
         if (!priceData && instrument.assetClass !== "CRYPTO" && !["XAUUSD", "XAGUSD"].includes(instrument.symbol)) {
           try {
             let ySym = instrument.symbol;
             if (ySym === "WTIUSD") ySym = "CL=F";
+            else if (ySym === "BANKNIFTY") ySym = "^NSEBANK";
+            else if (instrument.country === "IN" || ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "BANKBARODA"].includes(ySym)) ySym = `${ySym}.NS`;
             else if (instrument.assetClass === "FOREX") ySym = `${ySym}=X`;
 
             const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ySym)}?interval=15m&range=5d`, {

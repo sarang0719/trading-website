@@ -31,7 +31,7 @@ def train_model(df: pd.DataFrame, target_col: str, model_name: str) -> Tuple[His
         l2_regularization=1.0,
         class_weight='balanced',
         random_state=42,
-        early_stopping=True,
+        early_stopping='auto',
         n_iter_no_change=50
     )
     
@@ -69,7 +69,8 @@ def predict(model: HistGradientBoostingClassifier, features_list: list, df_row: 
     probs = model.predict_proba(X)[0]
     
     # HistGradientBoostingClassifier's classes_ property tells us the order
-    classes = list(model.classes_)
+    raw_classes = getattr(model, 'classes_', [0, 1, 2])
+    classes = list(raw_classes) if raw_classes is not None else [0, 1, 2]
     
     # Map back to our probabilities
     prob_dict = {classes[i]: probs[i] for i in range(len(classes))}

@@ -64,7 +64,7 @@ export async function runMigrations() {
   // --- OPTIMIZED BATCH MIGRATIONS ---
   // Create all essential types in parallel
   await Promise.all([
-    q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'asset_class') THEN CREATE TYPE asset_class AS ENUM ('INDIAN_STOCK','US_STOCK','ETF','MUTUAL_FUND','FOREX','CRYPTO'); END IF; END $$`),
+    q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'asset_class') THEN CREATE TYPE asset_class AS ENUM ('INDIAN_STOCK','US_STOCK','BANKING','ETF','MUTUAL_FUND','FOREX','CRYPTO'); ELSE ALTER TYPE asset_class ADD VALUE IF NOT EXISTS 'BANKING'; END IF; END $$`),
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_side') THEN CREATE TYPE order_side AS ENUM ('BUY','SELL'); END IF; END $$`),
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_type') THEN CREATE TYPE order_type AS ENUM ('MARKET','LIMIT','STOP_LOSS'); END IF; END $$`),
     q(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_status') THEN CREATE TYPE order_status AS ENUM ('PENDING','FILLED','CANCELLED','REJECTED'); END IF; END $$`),

@@ -10,56 +10,59 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
         return df
         
     df = df.copy()
+    close_series: pd.Series = pd.Series(df['close'])
+    high_series: pd.Series = pd.Series(df['high'])
+    low_series: pd.Series = pd.Series(df['low'])
     
     # -- EMAs (fallback to available length if fewer candles exist)
     n_candles = len(df)
-    df['EMA_9'] = ta.ema(df['close'], length=min(9, n_candles))
-    df['EMA_20'] = ta.ema(df['close'], length=min(20, n_candles))
-    df['EMA_50'] = ta.ema(df['close'], length=min(50, n_candles))
-    df['EMA_100'] = ta.ema(df['close'], length=min(100, n_candles))
-    df['EMA_200'] = ta.ema(df['close'], length=min(200, n_candles))
+    df['EMA_9'] = ta.ema(close_series, length=min(9, n_candles))
+    df['EMA_20'] = ta.ema(close_series, length=min(20, n_candles))
+    df['EMA_50'] = ta.ema(close_series, length=min(50, n_candles))
+    df['EMA_100'] = ta.ema(close_series, length=min(100, n_candles))
+    df['EMA_200'] = ta.ema(close_series, length=min(200, n_candles))
     
     # -- Set default fallbacks for indicator columns
-    df['RSI'] = 50.0
-    df['MACD'] = 0.0
-    df['MACD_Signal'] = 0.0
-    df['MACD_Hist'] = 0.0
+    df['RSI'] = pd.Series(50.0, index=df.index)
+    df['MACD'] = pd.Series(0.0, index=df.index)
+    df['MACD_Signal'] = pd.Series(0.0, index=df.index)
+    df['MACD_Hist'] = pd.Series(0.0, index=df.index)
     df['ATR'] = (df['high'] - df['low']).replace(0, 0.0001)
-    df['ADX'] = 25.0
-    df['CCI'] = 0.0
-    df['MOM'] = 0.0
+    df['ADX'] = pd.Series(25.0, index=df.index)
+    df['CCI'] = pd.Series(0.0, index=df.index)
+    df['MOM'] = pd.Series(0.0, index=df.index)
     df['BB_Lower'] = df['close']
     df['BB_Mid'] = df['close']
     df['BB_Upper'] = df['close']
-    df['STOCHRSI_K'] = 50.0
-    df['STOCHRSI_D'] = 50.0
-    df['ROC'] = 0.0
-    df['WILLR'] = -50.0
+    df['STOCHRSI_K'] = pd.Series(50.0, index=df.index)
+    df['STOCHRSI_D'] = pd.Series(50.0, index=df.index)
+    df['ROC'] = pd.Series(0.0, index=df.index)
+    df['WILLR'] = pd.Series(-50.0, index=df.index)
 
     # -- Oscillators & Momentum
-    rsi_calc = ta.rsi(df['close'], length=min(14, n_candles))
+    rsi_calc = ta.rsi(close_series, length=min(14, n_candles))
     if rsi_calc is not None and not rsi_calc.empty:
         df['RSI'] = rsi_calc
 
-    macd = ta.macd(df['close'])
+    macd = ta.macd(close_series)
     if macd is not None and not macd.empty:
         df['MACD'] = macd.iloc[:, 0]
         df['MACD_Signal'] = macd.iloc[:, 2]
         df['MACD_Hist'] = macd.iloc[:, 1]
     
-    atr_calc = ta.atr(df['high'], df['low'], df['close'], length=min(7, n_candles))
+    atr_calc = ta.atr(high_series, low_series, close_series, length=min(7, n_candles))
     if atr_calc is not None and not atr_calc.empty:
         df['ATR'] = atr_calc
     
-    adx = ta.adx(df['high'], df['low'], df['close'])
+    adx = ta.adx(high_series, low_series, close_series)
     if adx is not None and not adx.empty:
         df['ADX'] = adx.iloc[:, 0]
         
-    cci_calc = ta.cci(df['high'], df['low'], df['close'], length=min(14, n_candles))
+    cci_calc = ta.cci(high_series, low_series, close_series, length=min(14, n_candles))
     if cci_calc is not None and not cci_calc.empty:
         df['CCI'] = cci_calc
 
-    mom_calc = ta.mom(df['close'], length=min(10, n_candles))
+    mom_calc = ta.mom(close_series, length=min(10, n_candles))
     if mom_calc is not None and not mom_calc.empty:
         df['MOM'] = mom_calc
     
@@ -73,25 +76,25 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
         df['VWAP'] = df['close']
         
     # -- Bollinger Bands
-    bbands = ta.bbands(df['close'], length=min(20, n_candles))
+    bbands = ta.bbands(close_series, length=min(20, n_candles))
     if bbands is not None and not bbands.empty:
         df['BB_Lower'] = bbands.iloc[:, 0]
         df['BB_Mid'] = bbands.iloc[:, 1]
         df['BB_Upper'] = bbands.iloc[:, 2]
         
     # -- Stochastic RSI (Ultra-Fast Vectorized)
-    rsi = df['RSI']
-    rsi_min = rsi.rolling(14, min_periods=1).min()
-    rsi_max = rsi.rolling(14, min_periods=1).max()
+    rsi_s = pd.Series(df['RSI'])
+    rsi_min = rsi_s.rolling(14, min_periods=1).min()
+    rsi_max = rsi_s.rolling(14, min_periods=1).max()
     rsi_diff = (rsi_max - rsi_min).replace(0, 0.0001)
-    df['STOCHRSI_K'] = ((rsi - rsi_min) / rsi_diff) * 100
-    df['STOCHRSI_D'] = df['STOCHRSI_K'].rolling(3, min_periods=1).mean()
+    df['STOCHRSI_K'] = ((rsi_s - rsi_min) / rsi_diff) * 100
+    df['STOCHRSI_D'] = pd.Series(df['STOCHRSI_K']).rolling(3, min_periods=1).mean()
         
-    roc_calc = ta.roc(df['close'], length=min(14, n_candles))
+    roc_calc = ta.roc(close_series, length=min(14, n_candles))
     if roc_calc is not None and not roc_calc.empty:
         df['ROC'] = roc_calc
 
-    willr_calc = ta.willr(df['high'], df['low'], df['close'], length=min(14, n_candles))
+    willr_calc = ta.willr(high_series, low_series, close_series, length=min(14, n_candles))
     if willr_calc is not None and not willr_calc.empty:
         df['WILLR'] = willr_calc
     
@@ -112,7 +115,7 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     # -- Volatility & Momentum Ratios
     df['ATR_Rel'] = np.where(df['close'] > 0, df['ATR'] / df['close'], 0)
     df['BB_Width'] = np.where(df['BB_Mid'] > 0, (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid'], 0)
-    df['RSI_Vel'] = df['RSI'].diff()
+    df['RSI_Vel'] = rsi_s.diff()
     
     # -- Pure Vectorized Pattern Recognition (Zero TA-Lib warnings)
     body = (df['close'] - df['open']).abs()
@@ -164,7 +167,7 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # -- Force Index & Volume Profile Proxy
     df['Force_Index'] = (df['close'] - df['close'].shift(1)) * df['volume']
-    df['Force_Index_EMA'] = ta.ema(df['Force_Index'], length=13)
+    df['Force_Index_EMA'] = ta.ema(pd.Series(df['Force_Index']), length=13)
 
     # -- EMA Slopes & Acceleration (3-bar velocity)
     df['EMA_9_Slope'] = (df['EMA_9'] - df['EMA_9'].shift(3)) / df['close']
@@ -176,17 +179,22 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     df['ATR_Expansion_Ratio'] = np.where(atr_ma20 > 0, df['ATR'] / atr_ma20, 1.0)
 
     # -- Trend Confluence Composite Index (-3 to +3)
+    ema9_s = pd.Series(df['EMA_9'])
+    ema20_s = pd.Series(df['EMA_20'])
+    ema50_s = pd.Series(df['EMA_50'])
+    macd_h_s = pd.Series(df['MACD_Hist'])
+
     bull_count = (
-        (df['EMA_9'] > df['EMA_20']).astype(int) +
-        (df['EMA_20'] > df['EMA_50']).astype(int) +
-        (df['MACD_Hist'] > 0).astype(int) +
-        (df['RSI'] > 50).astype(int)
+        (ema9_s > ema20_s).astype(int) +
+        (ema20_s > ema50_s).astype(int) +
+        (macd_h_s > 0).astype(int) +
+        (rsi_s > 50).astype(int)
     )
     bear_count = (
-        (df['EMA_9'] < df['EMA_20']).astype(int) +
-        (df['EMA_20'] < df['EMA_50']).astype(int) +
-        (df['MACD_Hist'] < 0).astype(int) +
-        (df['RSI'] < 50).astype(int)
+        (ema9_s < ema20_s).astype(int) +
+        (ema20_s < ema50_s).astype(int) +
+        (macd_h_s < 0).astype(int) +
+        (rsi_s < 50).astype(int)
     )
     df['Trend_Confluence_Score'] = bull_count - bear_count
 

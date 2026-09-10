@@ -91,6 +91,7 @@ export type AiCreditsResponse = {
 export const assetClassEnum = pgEnum("asset_class", [
   "INDIAN_STOCK",
   "US_STOCK",
+  "BANKING",
   "ETF",
   "MUTUAL_FUND",
   "FOREX",
