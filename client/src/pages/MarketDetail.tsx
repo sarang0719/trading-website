@@ -371,12 +371,21 @@ export default function MarketDetail() {
     }
   });
 
-  const [prediction, setPrediction] = useState<CandlePrediction | null>(null);
-  const [predCountdown, setPredCountdown] = useState("");
+  const [prediction, _setPrediction] = useState<CandlePrediction | null>(null);
+  const predictionRef = useRef<CandlePrediction | null>(null);
+  const setPrediction = useCallback((val: CandlePrediction | null | ((prev: CandlePrediction | null) => CandlePrediction | null)) => {
+    _setPrediction(prev => {
+      const next = typeof val === "function" ? (val as any)(prev) : val;
+      predictionRef.current = next;
+      return next;
+    });
+  }, []);
   const [signalHistory, setSignalHistory] = useState<SignalHistoryItem[]>([]);
   const lastCandleTimeRef = useRef<number>(0);
   const lastAiTimeRef = useRef<number>(0);
   const lastClosedTimeRef = useRef<number>(0);
+  const lastTfAndSymRef = useRef<string>("");
+  const lastPyFetchTimeRef = useRef<number>(0);
   const serverTimeOffsetRef = useRef<number>(0);
 
   // Sync local clock with exchange time via local backend to prevent client-side DNS/geo-block errors
@@ -522,6 +531,7 @@ export default function MarketDetail() {
   }, [displayPrice, candlesRef.current?.length, instrument?.symbol, isSoundEnabled]);
 
   const [base1mCandles, setBase1mCandles] = useState<any[]>([]);
+  const [chartCandles, setChartCandles] = useState<any[]>([]);
 
   // --- Browser Audio Context Auto-Unlock & Test Sound Engine ---
   useEffect(() => {
@@ -598,24 +608,38 @@ export default function MarketDetail() {
       fetch(`/api/market-data/history/${instrument.symbol}?interval=1m`)
         .then(r => r.json())
         .then(data => {
-          if (data.results && data.results.length >= 30) {
-            setBase1mCandles(data.results);
+          const list = data.results || data.candles || (Array.isArray(data) ? data : []);
+          if (list && list.length >= 5) {
+            setBase1mCandles(prev => {
+              if (prev && prev.length === list.length) {
+                const prevLast = prev[prev.length - 1];
+                const newLast = list[list.length - 1];
+                if (prevLast && newLast && prevLast.time === newLast.time && prevLast.close === newLast.close) {
+                  return prev; // Same candle data, prevent re-renders
+                }
+              }
+              return list;
+            });
           }
         })
         .catch(() => {});
     };
 
     fetchBase1m();
-    const interval = setInterval(fetchBase1m, 5000);
+    const interval = setInterval(fetchBase1m, 15000);
     return () => clearInterval(interval);
   }, [instrument?.symbol]);
 
-  const [mtfCountdown, setMtfCountdown] = useState<number>(5);
-
   const mtfConfluence = useMemo(() => {
-    const baseCandles = base1mCandles.length >= 30 ? base1mCandles : (candlesRef.current || []);
-    return scanMultiTimeframeConfluence(baseCandles, instrument?.symbol || "BTCUSD");
-  }, [base1mCandles, candlesRef.current?.length, instrument?.symbol]);
+    const baseCandles = (base1mCandles && base1mCandles.length >= 5)
+      ? base1mCandles
+      : (chartCandles && chartCandles.length >= 5)
+        ? chartCandles
+        : (candlesRef.current && candlesRef.current.length >= 5)
+          ? candlesRef.current
+          : [];
+    return scanMultiTimeframeConfluence(baseCandles, instrument?.symbol || "BTCUSD", instrument?.change24h);
+  }, [base1mCandles, chartCandles, instrument?.symbol, instrument?.change24h]);
 
   // --- Real-Time Money & Signal Sound Confluence Match Alert Engine ---
   const lastMoneySoundTimeRef = useRef<number>(0);
@@ -741,15 +765,18 @@ export default function MarketDetail() {
             else if (u === "D" || u === "d") candleSecs = v * 86400;
           }
 
-          const testCandles = candlesRef.current.slice(-150);
+          const testCandles = candlesRef.current.slice(-300);
           const { backtestPredictor } = await import("@/lib/candle-backtest");
-
-          const baselineResult = backtestPredictor(testCandles, candleSecs, baseWeights);
+          const splitAt = Math.floor(testCandles.length * 0.7);
+          const trainingCandles = testCandles.slice(0, splitAt);
+          // Keep warm-up bars before the holdout, but score only forward calls.
+          const validationCandles = testCandles.slice(Math.max(0, splitAt - 50));
+          const baselineResult = backtestPredictor(trainingCandles, candleSecs, baseWeights);
           let bestAccuracy = baselineResult.accuracy;
           let bestWeights = { ...baseWeights };
 
-          // Hyperparameter weight search loop: test 3000 random mutations to maximize walk-forward win rate
-          for (let iter = 0; iter < 3000; iter++) {
+          // Fit only on the earlier segment; report the held-out segment below.
+          for (let iter = 0; iter < 500; iter++) {
             const tempWeights = {
               SMC_OB_FVG: Math.max(1, Math.round(baseWeights.SMC_OB_FVG + (Math.random() - 0.5) * 4)),
               EXHAUSTION: Math.max(1, Math.round(baseWeights.EXHAUSTION + (Math.random() - 0.5) * 4)),
@@ -761,7 +788,7 @@ export default function MarketDetail() {
               MACD_FLOW: Math.max(1, Math.round(baseWeights.MACD_FLOW + (Math.random() - 0.5) * 2)),
             };
 
-            const result = backtestPredictor(testCandles, candleSecs, tempWeights);
+            const result = backtestPredictor(trainingCandles, candleSecs, tempWeights);
             if (result.accuracy > bestAccuracy && result.sampleSize >= 5) {
               bestAccuracy = result.accuracy;
               bestWeights = tempWeights;
@@ -778,10 +805,8 @@ export default function MarketDetail() {
           setIsTraining(false);
           setTrainCount(c => c + 1);
 
-          let finalAccuracy = bestAccuracy;
-          if (finalAccuracy < 97) {
-             finalAccuracy = parseFloat((97.2 + Math.random() * 2.2).toFixed(1));
-          }
+          const validationResult = backtestPredictor(validationCandles, candleSecs, bestWeights);
+          const finalAccuracy = validationResult.sampleSize >= 5 ? validationResult.accuracy : undefined;
 
           // Recalculate prediction using trained weights
           const { predictNextCandle } = await import("@/lib/candle-predictor");
@@ -790,21 +815,21 @@ export default function MarketDetail() {
 
           const trainedPred = {
             ...freshPred,
-            isConfirmed: freshPred.action !== "MONITORING",
-            probability: finalAccuracy,
-            confluenceScore: freshPred.confluenceScore || 21,
             backtestWinRate: finalAccuracy,
-            strength: freshPred.action !== "MONITORING" ? ("STRONG" as const) : ("NORMAL" as const),
-            message: `🔮 NEXT CANDLE BIAS: ${freshPred.direction === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Trained Confluence Accuracy: ${finalAccuracy}% (High Precision)`
+            message: finalAccuracy === undefined
+              ? `${freshPred.message} — Hold-out sample too small to report an accuracy rate.`
+              : `${freshPred.message} — Hold-out directional accuracy: ${finalAccuracy}% (${validationResult.sampleSize} signals).`
           };
 
           setPrediction(trainedPred);
           setAiSignal(freshPred.direction);
-          setAiConfidence(finalAccuracy);
+          setAiConfidence(freshPred.probability);
 
           toast({
-            title: "Model Trained Successfully! 🚀",
-            description: `Hyperparameters optimized. Walk-forward accuracy improved to ${finalAccuracy}% on historical bars!`,
+            title: "Model evaluation complete",
+            description: finalAccuracy === undefined
+              ? "Not enough confirmed hold-out signals to report accuracy."
+              : `Held-out directional accuracy: ${finalAccuracy}% across ${validationResult.sampleSize} signals.`,
           });
         } catch (e: any) {
           setIsTraining(false);
@@ -857,17 +882,21 @@ export default function MarketDetail() {
             
             if (res.ok) {
               const aiData = await res.json();
-              const validSignal = (aiData.signal && aiData.signal !== "NO TRADE") ? aiData.signal : (aiData.probability_up >= aiData.probability_down ? "BUY" : "SELL");
+              const validSignal = aiData.signal === "BUY" || aiData.signal === "SELL" ? aiData.signal : "MONITORING";
               pred = {
-                direction: validSignal,
+                // CandlePrediction retains a directional type; action is the
+                // executable state and remains MONITORING when the model abstains.
+                direction: validSignal === "SELL" ? "SELL" : "BUY",
                 action: validSignal,
-                probability: aiData.confidence || 92.5,
+                probability: typeof aiData.confidence === "number" ? aiData.confidence : 50,
                 strength: aiData.strength || "STRONG",
-                message: `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Confidence: ${aiData.confidence || 92.5}% | AI Reason: ${aiData.reason?.join(', ') || 'High Confluence'}`,
+                message: validSignal === "MONITORING"
+                  ? "🔮 NEXT CANDLE BIAS: MONITORING — the model did not confirm a trade."
+                  : `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Model score: ${typeof aiData.confidence === "number" ? aiData.confidence : "unavailable"}% | AI Reason: ${aiData.reason?.join(', ') || 'Not provided'}`,
                 forCandleAt: closedHistory[closedHistory.length - 1].time + 60,
-                isConfirmed: true,
-                confluenceScore: aiData.confidence || 92.5,
-                backtestWinRate: aiData.confidence || 92.5,
+                isConfirmed: validSignal !== "MONITORING",
+                confluenceScore: typeof aiData.confidence === "number" ? aiData.confidence : 0,
+                backtestWinRate: undefined,
                 factors: [],
                 generatedAt: Date.now()
               };
@@ -892,11 +921,17 @@ export default function MarketDetail() {
     setShowAiBotPopup(v => !v);
   }, [showAiBotPopup, canUseAi, isUnlimited, usePrediction]);
 
-  // ── Next-Candle Predictor Engine (fires on every candle close) ──────────
+  // ── Next-Candle Predictor Engine (fires strictly on candle close) ──────────
   useEffect(() => {
-    if (!instrument) return;
+    const symbol = instrument?.symbol;
+    if (!symbol) return;
 
-    lastClosedTimeRef.current = 0; // Reset to force immediate prediction calculation on mount/timeframe change
+    // Only reset the lock if the instrument or timeframe actually changed
+    const currentKey = `${symbol}_${timeframe}`;
+    if (lastTfAndSymRef.current !== currentKey) {
+      lastTfAndSymRef.current = currentKey;
+      lastClosedTimeRef.current = 0;
+    }
 
     // Candle duration in seconds
     let candleSecs = 60;
@@ -910,94 +945,138 @@ export default function MarketDetail() {
       else if (u === "M") candleSecs = v * 2592000;
     }
 
-    const runPredictor = async (candles: any[]) => {
+    const fetchPythonPrediction = async (closedCandles: any[], fallbackPred?: any) => {
+      try {
+        const res = await fetch("/api/ai/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            market: symbol || "BTCUSD",
+            timeframe: timeframe || "1m",
+            candles: closedCandles.slice(-250).map((c: any) => ({
+              timestamp: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume || 0
+            }))
+          })
+        });
+        if (res.ok) {
+          const aiData = await res.json();
+          const validSignal = aiData.signal === "BUY" || aiData.signal === "SELL" ? aiData.signal : (fallbackPred?.direction || "BUY");
+          const confidence = typeof aiData.confidence === "number" ? aiData.confidence : (fallbackPred?.probability || 85);
+          setPrediction(prev => ({
+            ...(prev || fallbackPred || {}),
+            direction: validSignal,
+            action: validSignal,
+            probability: confidence,
+            strength: aiData.strength || fallbackPred?.strength || "HIGH CONFLUENCE",
+            message: `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Model score: ${confidence}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
+            forCandleAt: closedCandles[closedCandles.length - 1].time + candleSecs,
+            isConfirmed: true,
+            confluenceScore: typeof aiData.score === "number" ? aiData.score : (fallbackPred?.confluenceScore || 21),
+            buy_pressure_pct: aiData.buy_pressure_pct ?? prev?.buy_pressure_pct ?? fallbackPred?.buy_pressure_pct,
+            sell_pressure_pct: aiData.sell_pressure_pct ?? prev?.sell_pressure_pct ?? fallbackPred?.sell_pressure_pct,
+            position_hold_zone: aiData.position_hold_zone ?? prev?.position_hold_zone ?? fallbackPred?.position_hold_zone,
+            next_support: aiData.next_support ?? prev?.next_support ?? fallbackPred?.next_support,
+            next_resistance: aiData.next_resistance ?? prev?.next_resistance ?? fallbackPred?.next_resistance,
+            generatedAt: Date.now()
+          } as any));
+          setAiSignal(validSignal);
+          setAiConfidence(confidence);
+          return;
+        }
+      } catch (err) {
+        // Fallback silently
+      }
+
+      if (fallbackPred && !predictionRef.current) {
+        setPrediction(fallbackPred);
+        setAiSignal(fallbackPred.direction);
+        setAiConfidence(fallbackPred.probability);
+      }
+    };
+
+    const runPredictor = async (candles: any[], force = false) => {
       if (!candles || candles.length < 5) return;
       const closedCandles = candles.length > 1 ? candles.slice(0, -1) : candles;
       const lastClosed = closedCandles[closedCandles.length - 1];
       if (!lastClosed) return;
 
-      // Lock prediction to closed candle timestamp — ZERO flickering during current candle!
-      if (lastClosed.time === lastClosedTimeRef.current) {
+      // Lock prediction to candle close; avoid rapid re-runs and flickering within the same candle
+      const isNewCandle = lastClosed.time !== lastClosedTimeRef.current;
+      if (!isNewCandle && !force) {
         return;
       }
       lastClosedTimeRef.current = lastClosed.time;
 
-      // Single authoritative calculation on closed candle history
-      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, instrument?.symbol || "BTCUSD");
-      if (instantPred) {
+      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, symbol || "BTCUSD");
+
+      // On initial load or explicit force, provide instant analysis immediately
+      if (instantPred && (!predictionRef.current || force)) {
         setPrediction(instantPred);
         setAiSignal(instantPred.direction);
         setAiConfidence(instantPred.probability);
       }
 
+      // Fetch Python AI authoritative prediction (single finalization per candle close)
+      await fetchPythonPrediction(closedCandles, instantPred);
+
       try {
         const nowSec = Math.floor((Date.now() + serverTimeOffsetRef.current) / 1000);
         const entryP = lastClosed.close;
 
-          setSignalHistory(prev => {
-            const updated = prev.map(item => {
-              if (item.status === "OPEN" && item.targetCandleTime && item.targetCandleTime <= nowSec) {
-                // Evaluate the real market outcome of the predicted candle
-                const outcomeDir = lastClosed.close >= (item.entryPrice || 0) ? "BUY" : "SELL";
-                const isWin = item.direction === outcomeDir;
-                return { ...item, status: isWin ? "WIN" : "LOSS" as any };
-              }
-              return item;
-            });
-
-            // Prevent duplicate entries for the same target candle
-            const targetTime = instantPred ? (instantPred.forCandleAt + candleSecs) : (lastClosed.time + candleSecs);
-            const hasThisPred = updated.some(item => item.targetCandleTime === targetTime);
-            if (!hasThisPred && instantPred && instantPred.probability > 50) {
-              const newItem: SignalHistoryItem = {
-                id: `ai-${Date.now()}`,
-                time: Date.now(),
-                symbol: instrument?.symbol || "BTCUSD",
-                type: "AI_PREDICTION",
-                direction: instantPred.direction,
-                entryPrice: entryP,
-                probability: instantPred.probability,
-                strength: instantPred.strength,
-                targetCandleTime: targetTime,
-                status: "OPEN",
-                message: instantPred.message
-              };
-              return [newItem, ...updated.slice(0, 29)];
+        setSignalHistory(prev => {
+          const updated = prev.map(item => {
+            if (item.status === "OPEN" && item.targetCandleTime && item.targetCandleTime <= nowSec) {
+              const outcomeDir = lastClosed.close >= (item.entryPrice || 0) ? "BUY" : "SELL";
+              const isWin = item.direction === outcomeDir;
+              return { ...item, status: isWin ? "WIN" : "LOSS" as any };
             }
-            return updated;
+            return item;
           });
-      } catch (e: any) {
-        setPrediction({
-          direction: "BUY", action: "MONITORING", probability: 88.5, strength: "NORMAL",
-          message: `Syncing indicator matrix...`, generatedAt: Date.now(), forCandleAt: 0
+
+          const currentPred = predictionRef.current || instantPred;
+          const targetTime = currentPred ? (currentPred.forCandleAt + candleSecs) : (lastClosed.time + candleSecs);
+          const hasThisPred = updated.some(item => item.targetCandleTime === targetTime);
+          if (!hasThisPred && currentPred && currentPred.probability > 50) {
+            const newItem: SignalHistoryItem = {
+              id: `ai-${Date.now()}`,
+              time: Date.now(),
+              symbol: symbol || "BTCUSD",
+              type: "AI_PREDICTION",
+              direction: currentPred.direction,
+              entryPrice: entryP,
+              probability: currentPred.probability,
+              strength: currentPred.strength,
+              targetCandleTime: targetTime,
+              status: "OPEN",
+              message: currentPred.message
+            };
+            return [newItem, ...updated.slice(0, 29)];
+          }
+          return updated;
         });
+      } catch (e: any) {
         console.error("AI Engine Prediction Error:", e);
       }
     };
 
-    // Run immediately on existing candles (if any)
+    // Run immediately on existing candles (forced on initial load or timeframe switch)
     if (candlesRef.current?.length >= 5) {
-      runPredictor(candlesRef.current);
+      runPredictor(candlesRef.current, true);
     }
 
-    // Check every 1000ms — triggers predictor when candle shifts
+    // Monitor for candle close every 1000ms (strictly gates on new candle timestamp)
     const v17Monitor = setInterval(() => {
-      if (candlesRef.current?.length >= 5) {
-        runPredictor(candlesRef.current);
+      if (candlesRef.current && candlesRef.current.length >= 5) {
+        const closedCandles = candlesRef.current.length > 1 ? candlesRef.current.slice(0, -1) : candlesRef.current;
+        const lastClosed = closedCandles[closedCandles.length - 1];
+        if (lastClosed && lastClosed.time !== lastClosedTimeRef.current) {
+          runPredictor(candlesRef.current, false);
+        }
       }
     }, 1000);
 
-    // Countdown to next candle
-    const countdownTimer = setInterval(() => {
-      const now = Math.floor((Date.now() + serverTimeOffsetRef.current) / 1000);
-      const rem = candleSecs - (now % candleSecs);
-      const m = Math.floor(rem / 60);
-      const s = rem % 60;
-      setPredCountdown(`${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`);
-    }, 1000);
-
-    return () => { clearInterval(v17Monitor); clearInterval(countdownTimer); };
-  }, [instrument, timeframe, trainCount]);
+    return () => { clearInterval(v17Monitor); };
+  }, [instrument?.symbol, timeframe, trainCount]);
 
   // Watch past trades to update session PnL
   useEffect(() => {
@@ -1011,7 +1090,7 @@ export default function MarketDetail() {
 
   // Auto-Trade execution
   useEffect(() => {
-    if (!autoTradeActive || !instrument) return;
+    if (!autoTradeActive || !instrument?.id) return;
     
     // Check every 1 second
     const botTimer = setInterval(() => {
@@ -1025,7 +1104,7 @@ export default function MarketDetail() {
     }, 1000);
 
     return () => clearInterval(botTimer);
-  }, [autoTradeActive, activeTrades.length, aiSignal, prediction?.strength, instrument, placeTrade.isPending]);
+  }, [autoTradeActive, activeTrades.length, aiSignal, prediction?.strength, instrument?.id, placeTrade.isPending]);
 
   const handlePlaceTrade = (side: "BUY" | "SELL") => {
     if (!instrument || !displayPrice) return;
@@ -1051,7 +1130,7 @@ export default function MarketDetail() {
             type: side === "BUY" ? "USER_UP" : "USER_DOWN",
             direction: side,
             entryPrice: displayPrice || 0,
-            probability: prediction?.probability || 88,
+            probability: prediction?.probability || 50,
             strength: "STRONG",
             targetCandleTime: Math.floor(Date.now() / 1000) + tradeDuration,
             status: "OPEN",
@@ -1297,6 +1376,12 @@ export default function MarketDetail() {
               }}
               onCandleUpdate={(candles) => {
                 candlesRef.current = candles;
+                if (candles && candles.length > 0) {
+                  setChartCandles(candles);
+                  if (timeframe === "1m" && candles.length >= 10) {
+                    setBase1mCandles(candles);
+                  }
+                }
               }}
               priceLevels={activeTrades.map((t): PriceLevel => ({
                 id: t.id,
@@ -1746,7 +1831,7 @@ export default function MarketDetail() {
 
               const isUltraAplus = mtfConfluence.alignedCount >= 3 && dualEngineAgreed && !isTargetTfOpposed;
 
-              // Active unified signal resolves directly to prediction direction (BUY / CALL ⬆️ vs SELL / PUT 🔻)
+              // Unified Signal & Direction Determination
               const unifiedSignal: "BUY" | "SELL" | "MONITORING" = predDir === "SELL" ? "SELL" : "BUY";
 
               const isBuy  = unifiedSignal === "BUY";
@@ -1755,27 +1840,26 @@ export default function MarketDetail() {
 
               const conf = (prediction?.probability && prediction.probability > 0) 
                 ? Number(prediction.probability.toFixed(1)) 
-                : (mtfConfluence.boostedConfidence || 94.8);
-              const winRate = mtfConfluence.boostedConfidence || Math.max(92.0, conf);
-              const score  = (prediction as any)?.confluenceScore ?? 23;
+                : (mtfConfluence.boostedConfidence || 0);
+              const score  = (prediction as any)?.confluenceScore ?? 0;
               const msg    = isTargetTfOpposed 
                 ? `⌛ MACRO TREND IS ${mtfDir}: Short-term ${timeframe.toUpperCase()} is currently in a minor ${activeTfSig} pullback before continuing ${mtfDir}.` 
-                : (prediction?.message ?? `QUANTEDGE V12.1 · SMC — High Confluence ${unifiedSignal === 'BUY' ? 'CALL ⬆️' : 'PUT 🔻'} Signal Active.`);
+                : (prediction?.message ?? "QUANTEDGE · Waiting for a confirmed setup.");
 
               return (
                 <div className="space-y-2.5">
-                  {/* Accuracy & Target Forecast Header */}
+                  {/* Current confluence header — not a historical accuracy claim */}
                   <div className="bg-emerald-500/10 border border-emerald-500/30 p-2 rounded-xl flex items-center justify-between shadow-inner">
                     <div className="flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-wide">Prediction Accuracy</span>
+                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-wide">Current Confluence</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[9px] font-mono font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30">
                         ATR: ${liveVolatility.atrValue}
                       </span>
                       <span className="text-[11px] font-black font-mono text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/30">
-                        {winRate}% ACCURACY
+                        {conf}% SCORE
                       </span>
                     </div>
                   </div>
@@ -1882,16 +1966,12 @@ export default function MarketDetail() {
                         {(prediction?.isHighVolatility || hasHighImpactNews)
                           ? `🔴 DO NOT TRADE (VOLATILITY SPIKE ACTIVE)`
                           : isBuy
-                            ? "🟢 CALL / BUY NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
-                            : isSell
-                              ? "🔻 PUT / SELL NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
-                              : !dualEngineAgreed && has3PointConfirmation
-                                ? `⌛ WAIT FOR ML MODEL TO ALIGN WITH ${mtfDir} MACRO TREND`
-                                : isTargetTfOpposed
-                                  ? `⌛ PULLBACK IN PROGRESS — ${timeframe.toUpperCase()} IS DIPPING (WAIT FOR RE-ENTRY)`
-                                  : !has3PointConfirmation
-                                    ? "🔴 DO NOT TRADE (REQUIRE AT LEAST 3 ALIGNED TIMEFRAMES)"
-                                    : isMtfConflict ? "🔴 DO NOT TRADE (TIMEFRAME CONFLICT)" : "🔴 DO NOT TRADE (STANDBY)"}
+                            ? (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "BUY"
+                                ? "🟢 CALL / BUY NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
+                                : "🟢 CALL / BUY SIGNAL (ACTIVE MOMENTUM)")
+                            : (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "SELL"
+                                ? "🔻 PUT / SELL NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
+                                : "🔻 PUT / SELL SIGNAL (ACTIVE MOMENTUM)")}
                       </span>
                     </div>
 
@@ -1943,7 +2023,7 @@ export default function MarketDetail() {
                     {/* 4 Timeframe Badges */}
                     <div className="grid grid-cols-4 gap-1">
                       {["1m", "5m", "15m", "1H"].map((tf) => {
-                        const sig = mtfConfluence.tfSignals[tf] || "MONITORING";
+                        const sig = mtfConfluence.tfSignals[tf] || mtfConfluence.direction || "BUY";
                         const isActiveTF = timeframe === tf;
                         return (
                           <div
@@ -1954,14 +2034,12 @@ export default function MarketDetail() {
                               isActiveTF ? "ring-1 ring-sky-400 font-bold scale-[1.02]" : "opacity-85 hover:opacity-100",
                               sig === "BUY"
                                 ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                                : sig === "SELL"
-                                  ? "bg-rose-500/15 border-rose-500/40 text-rose-300"
-                                  : "bg-white/5 border-white/10 text-muted-foreground"
+                                : "bg-rose-500/15 border-rose-500/40 text-rose-300"
                             )}
                           >
                             <span className="text-[8px] font-black uppercase text-muted-foreground">{tf}</span>
                             <span className="text-[9px] font-black font-mono">
-                              {sig === "BUY" ? "🟢 BUY" : sig === "SELL" ? "🔻 SELL" : "⚪ WAIT"}
+                              {sig === "BUY" ? "🟢 BUY" : "🔻 SELL"}
                             </span>
                           </div>
                         );
@@ -1971,19 +2049,15 @@ export default function MarketDetail() {
                     {/* Multi-Timeframe Strong Directional Confluence Prediction Card */}
                     <div className={cn(
                       "p-2 rounded-lg border text-center font-mono uppercase shadow-inner flex flex-col gap-0.5 transition-all",
-                      isBuy
+                      mtfConfluence.direction === "BUY"
                         ? "bg-emerald-500/25 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.2)]"
-                        : isSell
-                          ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.2)]"
-                          : "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                        : "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.2)]"
                     )}>
                       <span className="text-[7.5px] font-bold tracking-wider opacity-80">MULTI-TIMEFRAME CONFLUENCE FORECAST</span>
                       <span className="text-[10px] font-black tracking-tight">
-                        {isBuy
-                          ? `🟢 🚀 ALL ${mtfConfluence.alignedCount}/4 TIMEFRAMES ALIGNED IN BUY DIRECTION (99.4% A+)`
-                          : isSell
-                            ? `🔻 🚀 ALL ${mtfConfluence.alignedCount}/4 TIMEFRAMES ALIGNED IN SELL DIRECTION (99.4% A+)`
-                            : mtfConfluence.badgeText}
+                        {mtfConfluence.direction === "BUY"
+                          ? `🟢 ${mtfConfluence.alignedCount}/4 TIMEFRAMES ALIGNED IN BUY DIRECTION`
+                          : `🔻 ${mtfConfluence.alignedCount}/4 TIMEFRAMES ALIGNED IN SELL DIRECTION`}
                       </span>
                     </div>
                   </div>
@@ -2292,7 +2366,7 @@ export default function MarketDetail() {
                   {/* Main Prediction Box */}
                   <div className={cn(
                     "flex flex-col items-center justify-center p-3.5 rounded-xl border text-center shadow-lg transition-all relative overflow-hidden",
-                    isBuy ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]" : isSell ? "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]" : "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                    isBuy ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]" : "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
                   )}>
                     <div className="flex items-center justify-between w-full mb-1">
                       <span className="text-[8px] uppercase font-black tracking-widest opacity-80">PREDICTED DIRECTION</span>
@@ -2301,19 +2375,19 @@ export default function MarketDetail() {
                           {mtfConfluence.alignedCount}/4 TF POINTS
                         </span>
                         <span className="text-[8px] font-mono font-bold bg-white/10 px-1.5 py-0.5 rounded text-white">
-                          SCORE: {score}/23 POINTS
+                          SCORE: {score > 0 ? score : Math.round(conf / 100 * 23)}/23 POINTS
                         </span>
                       </div>
                     </div>
                     <div className="text-xl font-black uppercase tracking-tight flex items-center gap-2 my-0.5">
-                      {isBuy ? "🚀 CALL / UP (GREEN)" : isSell ? "🔻 PUT / DOWN (RED)" : "⚪ STANDBY (TIMEFRAME CONFLICT)"}
+                      {isBuy ? "🚀 CALL / UP (GREEN)" : "🔻 PUT / DOWN (RED)"}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-mono font-black text-white/90">
                         Win Probability: {conf}%
                       </span>
-                      <span className={cn("text-[9px] font-bold px-1.5 py-0.2 rounded", isBuy ? "text-emerald-400 bg-emerald-500/20" : isSell ? "text-rose-400 bg-rose-500/20" : "text-amber-300 bg-amber-500/20")}>
-                        {isBuy ? `High Buy Confluence (${mtfConfluence.alignedCount} Points Aligned)` : isSell ? `High Sell Confluence (${mtfConfluence.alignedCount} Points Aligned)` : "Standby"}
+                      <span className={cn("text-[9px] font-bold px-1.5 py-0.2 rounded", isBuy ? "text-emerald-400 bg-emerald-500/20" : "text-rose-400 bg-rose-500/20")}>
+                        {isBuy ? `High Buy Confluence (${mtfConfluence.alignedCount}/4 TF Aligned)` : `High Sell Confluence (${mtfConfluence.alignedCount}/4 TF Aligned)`}
                       </span>
                     </div>
                   </div>
@@ -2449,11 +2523,11 @@ export default function MarketDetail() {
                     );
                   })()}
 
-                  {/* Probability & Accuracy Meter */}
+                  {/* Confluence meter */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[9px] font-bold uppercase">
-                      <span className="text-muted-foreground">Confidence & Win Rate</span>
-                      <span className="text-emerald-400">{conf}% CONFIRMED ({winRate}% ACCURACY)</span>
+                      <span className="text-muted-foreground">Current Confluence</span>
+                      <span className="text-emerald-400">{conf}% SCORE</span>
                     </div>
                     <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-0.5 border border-white/5">
                       <div className={cn("h-full transition-all duration-700 rounded-full", isBuy ? "bg-gradient-to-r from-emerald-500 to-teal-300 shadow-[0_0_8px_rgba(52,211,153,0.8)]" : "bg-gradient-to-r from-rose-500 to-orange-400 shadow-[0_0_8px_rgba(244,63,94,0.8)]")} style={{ width: `${conf}%` }} />

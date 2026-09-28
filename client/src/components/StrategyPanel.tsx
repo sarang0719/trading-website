@@ -191,7 +191,7 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
             volume: parseFloat(d[5]),
           }));
         } else {
-          const candleList = Array.isArray(data) ? data : (data.data || data.values || []);
+          const candleList = Array.isArray(data) ? data : (data.results || data.candles || data.data || data.values || []);
           if (!Array.isArray(candleList) || candleList.length === 0) throw new Error("No premium data returned");
           raw = candleList.map((d: any) => ({
             time:   typeof d.time === "number" ? d.time : new Date(d.datetime || d.time).getTime() / 1000,

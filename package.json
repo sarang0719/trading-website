@@ -12,9 +12,9 @@
     "start": "NODE_ENV=production node --max-old-space-size=512 dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
+    "test": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --forceExit",
+    "test:watch": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --watch",
+    "test:coverage": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --coverage --forceExit",
     "postinstall": "npm run build"
   },
   "dependencies": {
@@ -133,6 +133,7 @@
     "postcss": "^8.4.47",
     "supertest": "^6.3.3",
     "tailwindcss": "^3.4.17",
+    "ts-jest": "^29.2.5",
     "typescript": "5.6.3",
     "vite": "^7.3.0"
   },

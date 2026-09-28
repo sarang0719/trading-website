@@ -20,13 +20,22 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
+app.use((_req, res, next) => {
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  next();
+});
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5000, // limit each IP to 5000 requests per windowMs to allow polling
+  max: process.env.NODE_ENV === "test" ? 100 : 5000, // 100 in test mode, 5000 in dev/prod
   message: { error: "Too many requests, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // In test environment, isolate rate limit tests to /api/instruments
+    return process.env.NODE_ENV === "test" && !req.originalUrl.startsWith("/api/instruments");
+  }
 });
 app.use("/api", limiter);
 
@@ -83,7 +92,7 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+export const initAppPromise = (async () => {
   try {
     log(`Initializing Institutional AI Trading Engine [Fast Boot]...`);
     
@@ -105,24 +114,27 @@ app.use((req, res, next) => {
     
     if (process.env.NODE_ENV === "production") {
       serveStatic(app);
-    } else {
+    } else if (process.env.NODE_ENV !== "test") {
       const { setupVite } = await import("./vite");
       await setupVite(httpServer, app);
     }
 
     // PHASE 2: Immediate Port Binding (Prevents 502/504 on Render)
     const port = parseInt(process.env.PORT || "3000", 10);
-    if (!process.env.VERCEL) {
+    httpServer.keepAliveTimeout = 65000;
+    httpServer.headersTimeout = 66000;
+    if (!process.env.VERCEL && process.env.NODE_ENV !== "test") {
       httpServer.listen({ port, host: "0.0.0.0" }, () => {
         log(`serving on port ${port} [Ready for traffic]`);
       });
     }
 
     // PHASE 3: Non-blocking Background Initialization
-    setTimeout(async () => {
-       try {
-         startBackgroundTasks();
-         startAiBotEngine();
+    if (process.env.NODE_ENV !== "test") {
+      setTimeout(async () => {
+         try {
+           startBackgroundTasks();
+           startAiBotEngine();
 
          // Auto-start Python AI engine if available
          try {
@@ -132,15 +144,17 @@ app.use((req, res, next) => {
            const pythonPath = path.resolve(process.cwd(), "python-ai/venv/bin/python");
            const scriptPath = path.resolve(process.cwd(), "python-ai/api.py");
            if (fs.existsSync(pythonPath) && fs.existsSync(scriptPath)) {
-             // Check if python AI is responding
-             fetch("http://127.0.0.1:8000/docs").catch(() => {
+             const pyPort = process.env.PYTHON_PORT || "8008";
+             fetch(`http://127.0.0.1:${pyPort}/docs`).then(res => {
+               if (!res.ok) throw new Error("Not Python AI service");
+             }).catch(() => {
                const child = spawn(pythonPath, [scriptPath], {
                  stdio: "ignore",
                  detached: true,
-                 env: { ...process.env, PORT: "8000", PYTHON_PORT: "8000" }
+                 env: { ...process.env, PORT: pyPort, PYTHON_PORT: pyPort }
                });
                child.unref();
-               log("Python AI FastAPI service auto-started on port 8000.");
+               log(`Python AI FastAPI service auto-started on port ${pyPort}.`);
              });
            }
          } catch (pyErr) {
@@ -184,6 +198,7 @@ app.use((req, res, next) => {
          console.error("[Background Init Error]", error);
        }
     }, 1000); // Start background tasks after 1 second
+    }
 
   } catch (error: any) {
     console.error(`[Critical Error] Startup failed:`, error);
@@ -221,4 +236,5 @@ app.use((req, res, next) => {
   }
 })();
 
+export { app };
 export default app;

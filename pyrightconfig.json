@@ -5,14 +5,6 @@
     "python-ai/venv/lib/python3.13/site-packages",
     "python-ai"
   ],
-  "executionEnvironments": [
-    {
-      "root": "python-ai",
-      "extraPaths": [
-        "venv/lib/python3.13/site-packages"
-      ]
-    }
-  ],
   "reportPrivateImportUsage": false,
   "reportMissingTypeStubs": false
 }

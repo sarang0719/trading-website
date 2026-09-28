@@ -637,55 +637,58 @@ export function backtest(candles: Candle[], cfg: EngineConfig = {}): BacktestRes
   let peak   = 10000;
   let maxDD  = 0;
   const pnlSeries: number[] = [];
+  const accountRiskPct = 1; // Every simulated trade risks 1% of current equity.
+  let nextEligibleIdx = 0;  // Do not overlap trades in a single-account test.
 
   for (const sig of signals) {
     const sigIdx = candles.findIndex(c => c.time === sig.time);
-    if (sigIdx < 0 || sigIdx >= candles.length - 2) continue;
+    if (sigIdx < 0 || sigIdx >= candles.length - 2 || sigIdx < nextEligibleIdx) continue;
     if (sig.direction === "HOLD") continue;
 
-    const entry  = sig.entryPrice;
-    
-    // Fixed Time Options Math: N bars expiry
-    const barsExpiry   = 5; // e.g., 5 minute or 5 bar expiry
-    
+    // A signal is only knowable when its candle closes, so enter at the next
+    // candle open. Re-anchor the signal's risk distance to that executable price.
+    const entryIdx = sigIdx + 1;
+    const entry = candles[entryIdx].open;
+    const riskDistance = Math.max(Math.abs(sig.entryPrice - sig.stopLoss), entry * 0.0001);
+    const rewardDistance = Math.max(Math.abs(sig.takeProfit - sig.entryPrice), riskDistance * 0.5);
+    const sl = sig.direction === "BUY" ? entry - riskDistance : entry + riskDistance;
+    const tp = sig.direction === "BUY" ? entry + rewardDistance : entry - rewardDistance;
+    const barsExpiry = 20;
     let outcome: "WIN" | "LOSS" | "TIMEOUT" = "TIMEOUT";
-    let closedAt   = Math.min(sigIdx + barsExpiry, candles.length - 1);
-    let exitPrice  = candles[closedAt].close;
+    let closedAt = Math.min(entryIdx + barsExpiry, candles.length - 1);
+    let exitPrice = candles[closedAt].close;
 
-    if (sig.direction === "BUY") {
-      outcome = exitPrice > entry ? "WIN" : "LOSS";
-    } else {
-      outcome = exitPrice < entry ? "WIN" : "LOSS";
+    for (let j = entryIdx; j <= closedAt; j++) {
+      const bar = candles[j];
+      const stopHit = sig.direction === "BUY" ? bar.low <= sl : bar.high >= sl;
+      const targetHit = sig.direction === "BUY" ? bar.high >= tp : bar.low <= tp;
+      // OHLC cannot establish the intrabar order when both levels are touched;
+      // count it as a stop to avoid optimistic backtest bias.
+      if (stopHit) { outcome = "LOSS"; exitPrice = sl; closedAt = j; break; }
+      if (targetHit) { outcome = "WIN"; exitPrice = tp; closedAt = j; break; }
     }
+    nextEligibleIdx = closedAt + 1;
 
-    // 10% risk per trade. Fixed Options Payout: 85% on WIN, -100% on LOSS!
-    let investAmount = equity * 0.10;
-    const payoutFactor = 0.85; 
-
-    let pnlPct = 0; // percentage of whole equity
-    if (outcome === "WIN") {
-        const profit = investAmount * payoutFactor;
-        equity += profit;
-        pnlPct = (profit / equity) * 100;
-        wins++;   
-        grossWin += profit;
-    } else {
-        equity -= investAmount;
-        pnlPct = -(investAmount / equity) * 100;
-        losses++; 
-        grossLoss += investAmount;
-    }
+    const priceReturnPct = sig.direction === "BUY"
+      ? ((exitPrice - entry) / entry) * 100
+      : ((entry - exitPrice) / entry) * 100;
+    const rMultiple = (Math.abs(exitPrice - entry) / riskDistance) * (priceReturnPct >= 0 ? 1 : -1);
+    const pnlPct = Math.round((rMultiple * accountRiskPct) * 100) / 100;
+    const pnlAmount = equity * pnlPct / 100;
+    equity += pnlAmount;
+    if (pnlPct > 0) { wins++; grossWin += pnlAmount; }
+    else { losses++; grossLoss += Math.abs(pnlAmount); }
 
     if (equity > peak) peak = equity;
     const dd = ((peak - equity) / peak) * 100;
     if (dd > maxDD) maxDD = dd;
 
-    pnlSeries.push(equity);
+    pnlSeries.push(pnlPct);
 
     trades.push({
       time: sig.time,
       direction: sig.direction as "BUY" | "SELL",
-      entry, sl: sig.stopLoss, tp: sig.takeProfit,
+      entry, sl, tp,
       outcome,
       pnlPct: Math.round(pnlPct * 100) / 100,
       duration: closedAt - sigIdx,
@@ -700,8 +703,12 @@ export function backtest(candles: Candle[], cfg: EngineConfig = {}): BacktestRes
   const netPnlPct = Math.round(((equity - 10000) / 10000) * 100 * 100) / 100;
   
   const pf         = grossLoss > 0 ? Math.round((grossWin / grossLoss) * 100) / 100 : grossWin > 0 ? 9.99 : 0;
-  const avgWinPct  = wins   > 0 ? Math.round((grossWin  / wins)   * 100) / 100 : 0;
-  const avgLossPct = losses > 0 ? Math.round((grossLoss / losses) * 100) / 100 : 0;
+  const avgWinPct = wins > 0
+    ? Math.round((trades.filter(t => t.pnlPct > 0).reduce((sum, t) => sum + t.pnlPct, 0) / wins) * 100) / 100
+    : 0;
+  const avgLossPct = losses > 0
+    ? Math.round((Math.abs(trades.filter(t => t.pnlPct <= 0).reduce((sum, t) => sum + t.pnlPct, 0)) / losses) * 100) / 100
+    : 0;
 
   // Sharpe ratio (annualized, simplified)
   const avgR = pnlSeries.length > 0 ? pnlSeries.reduce((a, b) => a + b, 0) / pnlSeries.length : 0;

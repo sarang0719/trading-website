@@ -119,7 +119,15 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  app.post("/api/login", passport.authenticate("local"), (req, res) => {
+  const validateLogin = (req: any, res: any, next: any) => {
+    const { email, password } = req.body || {};
+    if (!email || typeof email !== 'string' || !email.includes('@') || !password) {
+      return res.status(400).json({ message: "Invalid email or password format" });
+    }
+    next();
+  };
+
+  const handleLoginSuccess = (req: any, res: any) => {
     const u: any = req.user;
     
     // Asynchronous Institutional Logging: Return response immediately, log in background
@@ -148,7 +156,10 @@ export async function setupAuth(app: Express) {
       autoInvestProfitLimit: u.autoInvestProfitLimit,
       autoInvestLossLimit: u.autoInvestLossLimit
     });
-  });
+  };
+
+  app.post("/api/login", validateLogin, passport.authenticate("local"), handleLoginSuccess);
+  app.post("/api/auth/login", validateLogin, passport.authenticate("local"), handleLoginSuccess);
 
   app.post("/api/logout", (req, res, next) => {
     req.logout((err) => {

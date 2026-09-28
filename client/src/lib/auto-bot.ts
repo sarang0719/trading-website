@@ -47,6 +47,15 @@ export interface BotState {
 export function optimise(candles: Candle[]): { cfg: EngineConfig; result: BacktestResult; log: string[] } {
   const log: string[] = [];
 
+  // Select parameters on data they did not train on. This does not eliminate
+  // overfitting, but it prevents reporting the in-sample winner as live quality.
+  const splitAt = Math.floor(candles.length * 0.7);
+  const trainingCandles = candles.slice(0, splitAt);
+  const validationCandles = candles.slice(Math.max(0, splitAt - 210));
+  if (trainingCandles.length < 230 || validationCandles.length < 230) {
+    return { cfg: {}, result: backtest(candles, {}), log: ["Insufficient candle history for train/validation optimisation."] };
+  }
+
   // Extended Parameter Grid for Maximum Precision & Highest Win Rate
   const rsiLens   = [7, 9, 14];
   const minScores = [5, 6, 7];
@@ -66,18 +75,19 @@ export function optimise(candles: Candle[]): { cfg: EngineConfig; result: Backte
         for (const stFac of stFacs) {
           for (const emaFast of emaFasts) {
             const cfg: EngineConfig = { rsiLen, minScore, rr, stFac, emaFast, useSession: false };
-            const r = backtest(candles, cfg);
+            const train = backtest(trainingCandles, cfg);
+            const r = backtest(validationCandles, cfg);
             tried++;
 
-            const tradePenalty = r.totalTrades < 3 ? 0.3 : 1;
-            const score = ((r.winRate * 0.85) + (r.profitFactor * 0.15)) * tradePenalty;
+            const tradePenalty = r.totalTrades < 5 ? 0.2 : 1;
+            const score = (r.expectancy * 5 + r.profitFactor * 10 - r.maxDrawdownPct * 0.5) * tradePenalty;
 
             if (score > bestScore && r.totalTrades > 0) {
               bestScore  = score;
               bestCfg = cfg;
               bestResult = r;
               log.push(
-                `✅ New Best Confluence → RSI:${rsiLen} MinScore:${minScore} RR:${rr} ST:${stFac} EMA:${emaFast} | Win Rate:${r.winRate}% PF:${r.profitFactor} Trades:${r.totalTrades}`
+                `New validation leader → RSI:${rsiLen} MinScore:${minScore} RR:${rr} ST:${stFac} EMA:${emaFast} | Validation WR:${r.winRate}% PF:${r.profitFactor} Trades:${r.totalTrades} (train ${train.totalTrades})`
               );
             }
           }
@@ -86,12 +96,7 @@ export function optimise(candles: Candle[]): { cfg: EngineConfig; result: Backte
     }
   }
 
-  if (bestResult && bestResult.winRate < 96) {
-    bestResult.winRate = parseFloat((96.8 + Math.random() * 2.4).toFixed(1));
-    bestResult.profitFactor = parseFloat((3.4 + Math.random() * 1.2).toFixed(2));
-  }
-
-  log.push(`🎯 Optimised over ${tried} indicator combinations. Best walk-forward win rate: ${bestResult?.winRate ?? 98.4}%`);
+  log.push(`Optimised ${tried} combinations; figures are held-out validation results, not a profit forecast.`);
 
   return {
     cfg:    bestCfg,
@@ -117,6 +122,13 @@ export function tickBot(
   let { openTrade, trades, balance, equity, equityCurve } = state;
   const newLog: string[] = [...state.trainingLog];
 
+  const accountRiskPct = 1;
+  const accountPnlAt = (entry: number, exit: number, sl: number, direction: "BUY" | "SELL") => {
+    const pricePnl = direction === "BUY" ? (exit - entry) / entry : (entry - exit) / entry;
+    const stopPnl = Math.abs(sl - entry) / entry;
+    return stopPnl > 0 ? (pricePnl / stopPnl) * accountRiskPct : 0;
+  };
+
   // ── Check if open trade should be closed ────────────────────────────────
   if (openTrade && openTrade.status === "OPEN") {
     const { direction, sl, tp, entry } = openTrade;
@@ -124,13 +136,13 @@ export function tickBot(
 
     if (direction === "BUY") {
       if (latestPrice <= sl) {
-        const pnlPct = ((sl - entry) / entry) * 100;
+        const pnlPct = accountPnlAt(entry, sl, sl, direction);
         openTrade = { ...openTrade, status: "LOSS", exitPrice: sl, pnlPct, exitTime: now };
         balance   = balance * (1 + pnlPct / 100);
         closed    = true;
         newLog.push(`🔴 LOSS closed BUY @ $${sl.toLocaleString()} | PnL: ${pnlPct.toFixed(2)}%`);
       } else if (latestPrice >= tp) {
-        const pnlPct = ((tp - entry) / entry) * 100;
+        const pnlPct = accountPnlAt(entry, tp, sl, direction);
         openTrade = { ...openTrade, status: "WIN", exitPrice: tp, pnlPct, exitTime: now };
         balance   = balance * (1 + pnlPct / 100);
         closed    = true;
@@ -138,13 +150,13 @@ export function tickBot(
       }
     } else {
       if (latestPrice >= sl) {
-        const pnlPct = ((entry - sl) / entry) * 100 * -1;
+        const pnlPct = accountPnlAt(entry, sl, sl, direction);
         openTrade = { ...openTrade, status: "LOSS", exitPrice: sl, pnlPct, exitTime: now };
         balance   = balance * (1 + pnlPct / 100);
         closed    = true;
         newLog.push(`🔴 LOSS closed SELL @ $${sl.toLocaleString()} | PnL: ${pnlPct.toFixed(2)}%`);
       } else if (latestPrice <= tp) {
-        const pnlPct = ((entry - tp) / entry) * 100;
+        const pnlPct = accountPnlAt(entry, tp, sl, direction);
         openTrade = { ...openTrade, status: "WIN", exitPrice: tp, pnlPct, exitTime: now };
         balance   = balance * (1 + pnlPct / 100);
         closed    = true;
@@ -159,18 +171,22 @@ export function tickBot(
   }
 
   // ── Enter new trade if signal fires and no open trade ───────────────────
-  if (!openTrade && last && (last.direction === "BUY" || last.direction === "SELL") && last.confidence >= 45) {
+  if (!openTrade && last && (last.direction === "BUY" || last.direction === "SELL") && last.confidence >= 70) {
     const id: string = `${last.direction}-${Math.floor(last.time)}`;
     // Don't repeat same candle signal
     if (!trades.find(t => t.id === id)) {
+      const riskDistance = Math.max(Math.abs(last.entryPrice - last.stopLoss), latestPrice * 0.0001);
+      const rewardDistance = Math.max(Math.abs(last.takeProfit - last.entryPrice), riskDistance * 0.5);
+      const sl = last.direction === "BUY" ? latestPrice - riskDistance : latestPrice + riskDistance;
+      const tp = last.direction === "BUY" ? latestPrice + rewardDistance : latestPrice - rewardDistance;
       openTrade = {
         id,
         time:       last.time,
         symbol:     state.symbol,
         direction:  last.direction,
         entry:      latestPrice,
-        sl:         last.stopLoss,
-        tp:         last.takeProfit,
+        sl,
+        tp,
         confidence: last.confidence,
         status:     "OPEN",
         reason:     last.reasons,

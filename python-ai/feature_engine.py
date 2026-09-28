@@ -1,204 +1,243 @@
-import pandas as pd
-import pandas_ta as ta
+from typing import Any
 import numpy as np
+import pandas as pd
+import pandas_ta as _ta
+
+ta: Any = _ta
+
+def _safe_series(s: Any, fallback: Any) -> pd.Series:
+    if s is not None and isinstance(s, pd.Series) and not s.empty:
+        return s
+    if isinstance(fallback, pd.Series):
+        return fallback
+    return pd.Series(fallback)
 
 def generate_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Generate all requested technical features for the AI model using pandas-ta.
+    High-performance feature generation pipeline for AI Next Candle Prediction.
+    Generates all 57 institutional features with full Pyright type-safety,
+    zero divide-by-zero warnings, and clean modern pandas operations.
     """
-    if df.empty or len(df) < 15:
+    if df.empty or len(df) < 5:
         return df
-        
+
     df = df.copy()
-    close_series: pd.Series = pd.Series(df['close'])
-    high_series: pd.Series = pd.Series(df['high'])
-    low_series: pd.Series = pd.Series(df['low'])
-    
-    # -- EMAs (fallback to available length if fewer candles exist)
     n_candles = len(df)
-    df['EMA_9'] = ta.ema(close_series, length=min(9, n_candles))
-    df['EMA_20'] = ta.ema(close_series, length=min(20, n_candles))
-    df['EMA_50'] = ta.ema(close_series, length=min(50, n_candles))
-    df['EMA_100'] = ta.ema(close_series, length=min(100, n_candles))
-    df['EMA_200'] = ta.ema(close_series, length=min(200, n_candles))
     
-    # -- Set default fallbacks for indicator columns
-    df['RSI'] = pd.Series(50.0, index=df.index)
-    df['MACD'] = pd.Series(0.0, index=df.index)
-    df['MACD_Signal'] = pd.Series(0.0, index=df.index)
-    df['MACD_Hist'] = pd.Series(0.0, index=df.index)
-    df['ATR'] = (df['high'] - df['low']).replace(0, 0.0001)
-    df['ADX'] = pd.Series(25.0, index=df.index)
-    df['CCI'] = pd.Series(0.0, index=df.index)
-    df['MOM'] = pd.Series(0.0, index=df.index)
-    df['BB_Lower'] = df['close']
-    df['BB_Mid'] = df['close']
-    df['BB_Upper'] = df['close']
-    df['STOCHRSI_K'] = pd.Series(50.0, index=df.index)
-    df['STOCHRSI_D'] = pd.Series(50.0, index=df.index)
-    df['ROC'] = pd.Series(0.0, index=df.index)
-    df['WILLR'] = pd.Series(-50.0, index=df.index)
-
-    # -- Oscillators & Momentum
-    rsi_calc = ta.rsi(close_series, length=min(14, n_candles))
-    if rsi_calc is not None and not rsi_calc.empty:
-        df['RSI'] = rsi_calc
-
-    macd = ta.macd(close_series)
-    if macd is not None and not macd.empty:
-        df['MACD'] = macd.iloc[:, 0]
-        df['MACD_Signal'] = macd.iloc[:, 2]
-        df['MACD_Hist'] = macd.iloc[:, 1]
+    close_series = pd.Series(df['close'], dtype=float)
+    high_series = pd.Series(df['high'], dtype=float)
+    low_series = pd.Series(df['low'], dtype=float)
+    vol_series = pd.Series(df['volume'], dtype=float)
+    open_series = pd.Series(df['open'], dtype=float)
     
+    close_np = close_series.to_numpy()
+    high_np = high_series.to_numpy()
+    low_np = low_series.to_numpy()
+    open_np = open_series.to_numpy()
+    vol_np = vol_series.to_numpy()
+    
+    safe_close = np.where(close_np > 0, close_np, 1.0)
+
+    # ── 1. Exponential Moving Averages ──
+    df['EMA_9'] = _safe_series(ta.ema(close_series, length=min(9, n_candles)), close_series)
+    df['EMA_20'] = _safe_series(ta.ema(close_series, length=min(20, n_candles)), close_series)
+    df['EMA_50'] = _safe_series(ta.ema(close_series, length=min(50, n_candles)), close_series)
+    df['EMA_100'] = _safe_series(ta.ema(close_series, length=min(100, n_candles)), close_series)
+    df['EMA_200'] = _safe_series(ta.ema(close_series, length=min(200, n_candles)), close_series)
+
+    # ── 2. Momentum & Oscillators ──
+    rsi_raw = ta.rsi(close_series, length=min(14, n_candles))
+    rsi_s = _safe_series(rsi_raw, pd.Series(50.0, index=df.index))
+    df['RSI'] = rsi_s
+
+    macd_calc = ta.macd(close_series)
+    if macd_calc is not None and isinstance(macd_calc, pd.DataFrame) and not macd_calc.empty:
+        df['MACD'] = macd_calc.iloc[:, 0]
+        df['MACD_Hist'] = macd_calc.iloc[:, 1]
+        df['MACD_Signal'] = macd_calc.iloc[:, 2]
+    else:
+        df['MACD'] = 0.0
+        df['MACD_Hist'] = 0.0
+        df['MACD_Signal'] = 0.0
+
     atr_calc = ta.atr(high_series, low_series, close_series, length=min(7, n_candles))
-    if atr_calc is not None and not atr_calc.empty:
-        df['ATR'] = atr_calc
-    
-    adx = ta.adx(high_series, low_series, close_series)
-    if adx is not None and not adx.empty:
-        df['ADX'] = adx.iloc[:, 0]
-        
+    df['ATR'] = _safe_series(atr_calc, pd.Series(np.maximum(0.0001, high_np - low_np), index=df.index))
+
+    adx_calc = ta.adx(high_series, low_series, close_series)
+    if adx_calc is not None and isinstance(adx_calc, pd.DataFrame) and not adx_calc.empty:
+        df['ADX'] = adx_calc.iloc[:, 0]
+    else:
+        df['ADX'] = 25.0
+
     cci_calc = ta.cci(high_series, low_series, close_series, length=min(14, n_candles))
-    if cci_calc is not None and not cci_calc.empty:
-        df['CCI'] = cci_calc
+    df['CCI'] = _safe_series(cci_calc, pd.Series(0.0, index=df.index))
 
     mom_calc = ta.mom(close_series, length=min(10, n_candles))
-    if mom_calc is not None and not mom_calc.empty:
-        df['MOM'] = mom_calc
-    
-    # -- VWAP (Volume Weighted Average Price)
-    try:
-        typ_price = (df['high'] + df['low'] + df['close']) / 3.0
-        cum_vol = df['volume'].cumsum()
-        cum_vol_price = (typ_price * df['volume']).cumsum()
-        df['VWAP'] = np.where(cum_vol > 0, cum_vol_price / cum_vol, df['close'])
-    except Exception:
-        df['VWAP'] = df['close']
-        
-    # -- Bollinger Bands
+    df['MOM'] = _safe_series(mom_calc, pd.Series(0.0, index=df.index))
+
+    # ── 3. Bollinger Bands ──
     bbands = ta.bbands(close_series, length=min(20, n_candles))
-    if bbands is not None and not bbands.empty:
+    if bbands is not None and isinstance(bbands, pd.DataFrame) and not bbands.empty:
         df['BB_Lower'] = bbands.iloc[:, 0]
         df['BB_Mid'] = bbands.iloc[:, 1]
         df['BB_Upper'] = bbands.iloc[:, 2]
-        
-    # -- Stochastic RSI (Ultra-Fast Vectorized)
-    rsi_s = pd.Series(df['RSI'])
+    else:
+        df['BB_Lower'] = close_series
+        df['BB_Mid'] = close_series
+        df['BB_Upper'] = close_series
+
+    # ── 4. Stochastic RSI ──
     rsi_min = rsi_s.rolling(14, min_periods=1).min()
     rsi_max = rsi_s.rolling(14, min_periods=1).max()
-    rsi_diff = (rsi_max - rsi_min).replace(0, 0.0001)
-    df['STOCHRSI_K'] = ((rsi_s - rsi_min) / rsi_diff) * 100
-    df['STOCHRSI_D'] = pd.Series(df['STOCHRSI_K']).rolling(3, min_periods=1).mean()
-        
+    rsi_diff = np.where((rsi_max - rsi_min) > 0, rsi_max - rsi_min, 0.0001)
+    df['STOCHRSI_K'] = ((rsi_s - rsi_min) / rsi_diff) * 100.0
+    stoch_k_s = pd.Series(df['STOCHRSI_K'], dtype=float)
+    df['STOCHRSI_D'] = stoch_k_s.rolling(3, min_periods=1).mean()
+
+    # ── 5. Rate of Change & Williams %R ──
     roc_calc = ta.roc(close_series, length=min(14, n_candles))
-    if roc_calc is not None and not roc_calc.empty:
-        df['ROC'] = roc_calc
+    df['ROC'] = _safe_series(roc_calc, pd.Series(0.0, index=df.index))
 
     willr_calc = ta.willr(high_series, low_series, close_series, length=min(14, n_candles))
-    if willr_calc is not None and not willr_calc.empty:
-        df['WILLR'] = willr_calc
-    
-    # -- Custom Features & Ratios for Ultra-High Accuracy
-    df['Body_Size'] = df['close'] - df['open']
-    df['Upper_Wick'] = df['high'] - df[['open', 'close']].max(axis=1)
-    df['Lower_Wick'] = df[['open', 'close']].min(axis=1) - df['low']
-    df['Candle_Range'] = df['high'] - df['low']
-    df['Body_Ratio'] = np.where(df['Candle_Range'] > 0, abs(df['Body_Size']) / df['Candle_Range'], 0)
-    df['Upper_Wick_Ratio'] = np.where(df['Candle_Range'] > 0, df['Upper_Wick'] / df['Candle_Range'], 0)
-    df['Lower_Wick_Ratio'] = np.where(df['Candle_Range'] > 0, df['Lower_Wick'] / df['Candle_Range'], 0)
-    
-    # -- Institutional EMA Ratios & Velocity
-    df['EMA_9_20_Diff'] = (df['EMA_9'] - df['EMA_20']) / df['close']
-    df['EMA_20_50_Diff'] = (df['EMA_20'] - df['EMA_50']) / df['close']
-    df['EMA_50_200_Diff'] = (df['EMA_50'] - df['EMA_200']) / df['close']
-    
-    # -- Volatility & Momentum Ratios
-    df['ATR_Rel'] = np.where(df['close'] > 0, df['ATR'] / df['close'], 0)
-    df['BB_Width'] = np.where(df['BB_Mid'] > 0, (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid'], 0)
-    df['RSI_Vel'] = rsi_s.diff()
-    
-    # -- Pure Vectorized Pattern Recognition (Zero TA-Lib warnings)
-    body = (df['close'] - df['open']).abs()
-    rng = df['high'] - df['low']
-    rng_safe = np.where(rng > 0, rng, 1.0)
-    upper_w = df['high'] - df[['open', 'close']].max(axis=1)
-    lower_w = df[['open', 'close']].min(axis=1) - df['low']
+    df['WILLR'] = _safe_series(willr_calc, pd.Series(-50.0, index=df.index))
 
-    # Doji: body <= 10% of total candle range
-    df['CDL_DOJI'] = np.where(body / rng_safe <= 0.10, 100, 0)
+    # ── 6. VWAP ──
+    typ_price = (high_np + low_np + close_np) / 3.0
+    cum_vol = np.cumsum(vol_np)
+    cum_vol_price = np.cumsum(typ_price * vol_np)
+    df['VWAP'] = np.where(cum_vol > 0, cum_vol_price / np.maximum(cum_vol, 1e-6), close_np)
 
-    # Hammer / Shooting Star: lower wick >= 2x body and upper wick <= 0.2 * body
-    is_hammer = (lower_w >= 2 * body) & (upper_w <= 0.2 * body) & (body > 0)
+    # ── 7. Price Action & Candle Geometry ──
+    df['Body_Size'] = close_np - open_np
+    candle_max = np.maximum(open_np, close_np)
+    candle_min = np.minimum(open_np, close_np)
+    df['Upper_Wick'] = high_np - candle_max
+    df['Lower_Wick'] = candle_min - low_np
+    df['Candle_Range'] = high_np - low_np
+    safe_range = np.where(df['Candle_Range'].to_numpy() > 0, df['Candle_Range'].to_numpy(), 0.0001)
+
+    df['Body_Ratio'] = np.abs(df['Body_Size'].to_numpy()) / safe_range
+    df['Upper_Wick_Ratio'] = df['Upper_Wick'].to_numpy() / safe_range
+    df['Lower_Wick_Ratio'] = df['Lower_Wick'].to_numpy() / safe_range
+
+    # ── 8. EMA Ratios & Velocity ──
+    df['EMA_9_20_Diff'] = (pd.Series(df['EMA_9'], dtype=float).to_numpy() - pd.Series(df['EMA_20'], dtype=float).to_numpy()) / safe_close
+    df['EMA_20_50_Diff'] = (pd.Series(df['EMA_20'], dtype=float).to_numpy() - pd.Series(df['EMA_50'], dtype=float).to_numpy()) / safe_close
+    df['EMA_50_200_Diff'] = (pd.Series(df['EMA_50'], dtype=float).to_numpy() - pd.Series(df['EMA_200'], dtype=float).to_numpy()) / safe_close
+
+    # ── 9. Volatility & Momentum Ratios ──
+    df['ATR_Rel'] = pd.Series(df['ATR'], dtype=float).to_numpy() / safe_close
+    bb_mid_np = pd.Series(df['BB_Mid'], dtype=float).to_numpy()
+    safe_bb_mid = np.where(bb_mid_np > 0, bb_mid_np, 1.0)
+    df['BB_Width'] = (pd.Series(df['BB_Upper'], dtype=float).to_numpy() - pd.Series(df['BB_Lower'], dtype=float).to_numpy()) / safe_bb_mid
+    df['RSI_Vel'] = rsi_s.diff().fillna(0.0)
+
+    # ── 10. Vectorized Candlestick Patterns ──
+    body_abs = np.abs(df['Body_Size'].to_numpy())
+    df['CDL_DOJI'] = np.where((body_abs / safe_range) <= 0.10, 100, 0)
+
+    is_hammer = (df['Lower_Wick'].to_numpy() >= 2.0 * body_abs) & (df['Upper_Wick'].to_numpy() <= 0.2 * body_abs) & (body_abs > 0)
     df['CDL_HAMMER'] = np.where(is_hammer, 100, 0)
 
-    # Engulfing: current candle body engulfs previous candle body
-    prev_open = df['open'].shift(1)
-    prev_close = df['close'].shift(1)
-    bull_engulf = (df['close'] > df['open']) & (prev_close < prev_open) & (df['close'] >= prev_open) & (df['open'] <= prev_close)
-    bear_engulf = (df['close'] < df['open']) & (prev_close > prev_open) & (df['close'] <= prev_open) & (df['open'] >= prev_close)
+    prev_open = open_series.shift(1).to_numpy()
+    prev_close = close_series.shift(1).to_numpy()
+    bull_engulf = (close_np > open_np) & (prev_close < prev_open) & (close_np >= prev_open) & (open_np <= prev_close)
+    bear_engulf = (close_np < open_np) & (prev_close > prev_open) & (close_np <= prev_open) & (open_np >= prev_close)
     df['CDL_ENGULFING'] = np.where(bull_engulf, 100, np.where(bear_engulf, -100, 0))
-            
-    # -- Stochastic Oscillator (Ultra-Fast Vectorized)
-    low_14 = df['low'].rolling(14, min_periods=1).min()
-    high_14 = df['high'].rolling(14, min_periods=1).max()
-    stoch_diff = (high_14 - low_14).replace(0, 0.0001)
-    df['STOCH_K'] = ((df['close'] - low_14) / stoch_diff) * 100
-    df['STOCH_D'] = df['STOCH_K'].rolling(3, min_periods=1).mean()
 
-    # -- Keltner Channels (Ultra-Fast Vectorized)
-    tp = (df['high'] + df['low'] + df['close']) / 3.0
-    kc_mid = ta.ema(tp, length=min(20, n_candles))
-    df['KC_Mid'] = kc_mid if kc_mid is not None else tp
-    df['KC_Upper'] = df['KC_Mid'] + (2.0 * df['ATR'])
-    df['KC_Lower'] = df['KC_Mid'] - (2.0 * df['ATR'])
-    kc_diff = (df['KC_Upper'] - df['KC_Lower']).replace(0, 0.0001)
-    df['KC_Pos'] = (df['close'] - df['KC_Lower']) / kc_diff
+    # ── 11. Stochastic Oscillator ──
+    low_14 = low_series.rolling(14, min_periods=1).min()
+    high_14 = high_series.rolling(14, min_periods=1).max()
+    stoch_diff = np.where((high_14 - low_14) > 0, high_14 - low_14, 0.0001)
+    df['STOCH_K'] = ((close_series - low_14) / stoch_diff) * 100.0
+    stoch_k_series = pd.Series(df['STOCH_K'], dtype=float)
+    df['STOCH_D'] = stoch_k_series.rolling(3, min_periods=1).mean()
 
-    # -- Pivot Points (Classic relative distance)
-    prev_h = df['high'].shift(1)
-    prev_l = df['low'].shift(1)
-    prev_c = df['close'].shift(1)
+    # ── 12. Keltner Channels ──
+    tp_series = pd.Series(typ_price, index=df.index, dtype=float)
+    kc_mid = ta.ema(tp_series, length=min(20, n_candles))
+    df['KC_Mid'] = _safe_series(kc_mid, tp_series)
+    atr_series = pd.Series(df['ATR'], dtype=float)
+    df['KC_Upper'] = pd.Series(df['KC_Mid'], dtype=float) + (2.0 * atr_series)
+    df['KC_Lower'] = pd.Series(df['KC_Mid'], dtype=float) - (2.0 * atr_series)
+    kc_diff = np.where((df['KC_Upper'] - df['KC_Lower']) > 0, df['KC_Upper'] - df['KC_Lower'], 0.0001)
+    df['KC_Pos'] = (close_series - df['KC_Lower']) / kc_diff
+
+    # ── 13. Pivot Points Distances ──
+    prev_h = high_series.shift(1).bfill().to_numpy()
+    prev_l = low_series.shift(1).bfill().to_numpy()
+    prev_c = close_series.shift(1).bfill().to_numpy()
     pp = (prev_h + prev_l + prev_c) / 3.0
-    r1 = (2 * pp) - prev_l
-    s1 = (2 * pp) - prev_h
-    df['PP_Dist'] = np.where(df['close'] > 0, (df['close'] - pp) / df['close'], 0)
-    df['R1_Dist'] = np.where(df['close'] > 0, (df['close'] - r1) / df['close'], 0)
-    df['S1_Dist'] = np.where(df['close'] > 0, (df['close'] - s1) / df['close'], 0)
+    r1 = (2.0 * pp) - prev_l
+    s1 = (2.0 * pp) - prev_h
+    df['PP_Dist'] = (close_np - pp) / safe_close
+    df['R1_Dist'] = (close_np - r1) / safe_close
+    df['S1_Dist'] = (close_np - s1) / safe_close
 
-    # -- Force Index & Volume Profile Proxy
-    df['Force_Index'] = (df['close'] - df['close'].shift(1)) * df['volume']
-    df['Force_Index_EMA'] = ta.ema(pd.Series(df['Force_Index']), length=13)
+    # ── 14. Force Index ──
+    close_shift1 = close_series.shift(1).fillna(close_series).to_numpy()
+    force_idx_np = (close_np - close_shift1) * vol_np
+    df['Force_Index'] = force_idx_np
+    fi_series = pd.Series(force_idx_np, index=df.index, dtype=float)
+    fi_ema = ta.ema(fi_series, length=13)
+    df['Force_Index_EMA'] = _safe_series(fi_ema, fi_series)
 
-    # -- EMA Slopes & Acceleration (3-bar velocity)
-    df['EMA_9_Slope'] = (df['EMA_9'] - df['EMA_9'].shift(3)) / df['close']
-    df['EMA_20_Slope'] = (df['EMA_20'] - df['EMA_20'].shift(3)) / df['close']
-    df['EMA_50_Slope'] = (df['EMA_50'] - df['EMA_50'].shift(3)) / df['close']
+    # ── 15. EMA Slopes ──
+    ema9_series = pd.Series(df['EMA_9'], dtype=float)
+    ema20_series = pd.Series(df['EMA_20'], dtype=float)
+    ema50_series = pd.Series(df['EMA_50'], dtype=float)
+    df['EMA_9_Slope'] = (ema9_series - ema9_series.shift(3).bfill()).to_numpy() / safe_close
+    df['EMA_20_Slope'] = (ema20_series - ema20_series.shift(3).bfill()).to_numpy() / safe_close
+    df['EMA_50_Slope'] = (ema50_series - ema50_series.shift(3).bfill()).to_numpy() / safe_close
 
-    # -- ATR Volatility Expansion Ratio (Current ATR vs 20-period Moving Average of ATR)
-    atr_ma20 = df['ATR'].rolling(window=20).mean()
-    df['ATR_Expansion_Ratio'] = np.where(atr_ma20 > 0, df['ATR'] / atr_ma20, 1.0)
+    # ── 16. ATR Expansion ──
+    atr_ma20 = np.asarray(atr_series.rolling(window=20, min_periods=1).mean())
+    df['ATR_Expansion_Ratio'] = np.where(atr_ma20 > 0, atr_series.to_numpy() / atr_ma20, 1.0)
 
-    # -- Trend Confluence Composite Index (-3 to +3)
-    ema9_s = pd.Series(df['EMA_9'])
-    ema20_s = pd.Series(df['EMA_20'])
-    ema50_s = pd.Series(df['EMA_50'])
-    macd_h_s = pd.Series(df['MACD_Hist'])
+    # ── 17. Trend Confluence Score ──
+    ema9_val = ema9_series.to_numpy()
+    ema20_val = ema20_series.to_numpy()
+    ema50_val = ema50_series.to_numpy()
+    macd_h_val = pd.Series(df['MACD_Hist'], dtype=float).to_numpy()
+    rsi_val = rsi_s.to_numpy()
 
     bull_count = (
-        (ema9_s > ema20_s).astype(int) +
-        (ema20_s > ema50_s).astype(int) +
-        (macd_h_s > 0).astype(int) +
-        (rsi_s > 50).astype(int)
+        (ema9_val > ema20_val).astype(int) +
+        (ema20_val > ema50_val).astype(int) +
+        (macd_h_val > 0).astype(int) +
+        (rsi_val > 50).astype(int)
     )
     bear_count = (
-        (ema9_s < ema20_s).astype(int) +
-        (ema20_s < ema50_s).astype(int) +
-        (macd_h_s < 0).astype(int) +
-        (rsi_s < 50).astype(int)
+        (ema9_val < ema20_val).astype(int) +
+        (ema20_val < ema50_val).astype(int) +
+        (macd_h_val < 0).astype(int) +
+        (rsi_val < 50).astype(int)
     )
     df['Trend_Confluence_Score'] = bull_count - bear_count
 
-    df.bfill(inplace=True)
-    df.ffill(inplace=True)
-    df.fillna(0, inplace=True)
+    # ── 18. SMC Order Block & Liquidity ──
+    df['Wick_Exhaustion_Diff'] = (df['Lower_Wick'].to_numpy() - df['Upper_Wick'].to_numpy()) / safe_range
+    body_ratio_np = pd.Series(df['Body_Ratio'], dtype=float).to_numpy()
+    vol_delta = np.where(close_np >= open_np, vol_np * body_ratio_np, -vol_np * body_ratio_np)
+    vol_delta_s = pd.Series(vol_delta, index=df.index, dtype=float)
+    df['Volume_Delta_Proxy'] = vol_delta_s
+    df['Volume_Delta_MA'] = vol_delta_s.rolling(5, min_periods=1).mean()
+
+    # ── 19. Multi-EMA Stack Alignment Score ──
+    ema100_val = pd.Series(df['EMA_100'], dtype=float).to_numpy()
+    ema200_val = pd.Series(df['EMA_200'], dtype=float).to_numpy()
+    df['EMA_Stack_Score'] = (
+        (ema9_val > ema20_val).astype(int) +
+        (ema20_val > ema50_val).astype(int) +
+        (ema50_val > ema100_val).astype(int) +
+        (ema100_val > ema200_val).astype(int) -
+        (ema9_val < ema20_val).astype(int) -
+        (ema20_val < ema50_val).astype(int) -
+        (ema50_val < ema100_val).astype(int) -
+        (ema100_val < ema200_val).astype(int)
+    )
+
+    # Clean fillna & infinities without deprecated inplace
+    df = df.replace([np.inf, -np.inf], 0.0)
+    df = df.bfill().ffill().fillna(0.0)
     return df

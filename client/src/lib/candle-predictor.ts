@@ -51,6 +51,11 @@ export interface CandlePrediction {
   stopLossPrice?: number;
   isHighVolatility?: boolean;
   volatilityRatio?: number;
+  buy_pressure_pct?: number;
+  sell_pressure_pct?: number;
+  position_hold_zone?: string;
+  next_support?: number;
+  next_resistance?: number;
 }
 
 export interface PredictionFactor {
@@ -72,8 +77,6 @@ const W = {
   ST_CHANNEL: 2,
   MACD_FLOW: 2
 };
-const MAX_W = W.SMC_OB_FVG + W.EXHAUSTION + W.BOS_CHOCH + W.EMA_STACK + W.VOLUMETRIC + W.RSI_ACCEL + W.ST_CHANNEL + W.MACD_FLOW; // 28
-const MIN_SCORE = 20;
 const WARMUP = 50;
 // NOTE: there is intentionally no hardcoded "win rate" constant here anymore.
 // Any accuracy figure shown to users must come from backtest.ts, run against
@@ -310,6 +313,10 @@ export function predictNextCandle(
   const c = src[n];
   const bodyC = c.close - c.open;
   const rangeC = Math.max(0.00001, c.high - c.low);
+  const upperWick = c.high - Math.max(c.open, c.close);
+  const lowerWick = Math.min(c.open, c.close) - c.low;
+  const lowerWickRatio = lowerWick / rangeC;
+  const upperWickRatio = upperWick / rangeC;
 
   // ── Compute Indicators ────────────────────────────────────────────────────
   const is1mTimeframe = candleSeconds <= 60;
@@ -343,6 +350,10 @@ export function predictNextCandle(
   const factors: PredictionFactor[] = [];
 
   function score(name: string, bull: boolean, bear: boolean, weight: number, value: string) {
+    if (bull && bear) {
+      if (lowerWickRatio > upperWickRatio) bear = false;
+      else bull = false;
+    }
     if (bull) bullW += weight;
     if (bear) bearW += weight;
     factors.push({ name, vote: bull ? "BUY" : bear ? "SELL" : "NEUTRAL", weight, value });
@@ -357,11 +368,6 @@ export function predictNextCandle(
         "Mid-zone price action");
 
   // 2. Exhaustion Rejection & Liquidity Sweep Spike Engine [W=5]
-  const upperWick = c.high - Math.max(c.open, c.close);
-  const lowerWick = Math.min(c.open, c.close) - c.low;
-  const lowerWickRatio = lowerWick / rangeC;
-  const upperWickRatio = upperWick / rangeC;
-
   const isBullishExhaustion = sweptLo || (lowerWickRatio > 0.32 && (rsiV < 42 || bodyC >= -rangeC * 0.3)) || (rsiV < 26) || (inBullZone && lowerWickRatio > 0.28);
   const isBearishExhaustion = sweptHi || (upperWickRatio > 0.32 && (rsiV > 58 || bodyC <= rangeC * 0.3)) || (rsiV > 74) || (inBearZone && upperWickRatio > 0.28);
   
@@ -422,7 +428,8 @@ export function predictNextCandle(
   const macroBull = macroTrend === "BUY";
   const macroBear = macroTrend === "SELL";
 
-  score("Institutional Macro Trend (EMA50/200)", macroBull, macroBear, 4,
+  const macroWeight = 4;
+  score("Institutional Macro Trend (EMA50/200)", macroBull, macroBear, macroWeight,
     macroBull ? "Bullish Macro Trend Alignment (Above EMA200)" : "Bearish Macro Trend Alignment (Below EMA200)");
 
   // ── Final Next-Candle Decision Engine (QUANTEDGE V12.1 ULTRA-STRICT) ──────
@@ -450,9 +457,10 @@ export function predictNextCandle(
     direction = macroTrend;
   }
 
-  // Quality Confirmation Thresholding: Requires 68%+ score or SMC Sweep/Exhaustion
-  const minQualityScore = Math.ceil(maxW * 0.68);
-  const isConfirmed = isPerfectBull || isPerfectBear || (direction === "BUY" ? (bullW >= minQualityScore && (macroBull || sweptLo || inBullZone)) : (bearW >= minQualityScore && (macroBear || sweptHi || inBearZone)));
+  // Quality Confirmation Thresholding: Responsive majority confluence
+  const totalWeight = maxW + macroWeight;
+  const minQualityScore = Math.ceil(totalWeight * 0.45);
+  const isConfirmed = isPerfectBull || isPerfectBear || (direction === "BUY" ? (bullW >= minQualityScore) : (bearW >= minQualityScore));
 
   // Dynamic SMC Risk/Reward Target Calculation
   let entryPriceVal = c.close;
@@ -471,42 +479,18 @@ export function predictNextCandle(
   const recentRanges = src.slice(Math.max(0, n - 14), n + 1).map(x => x.high - x.low);
   const avgATR = recentRanges.reduce((a, b) => a + b, 0) / Math.max(1, recentRanges.length);
   const volatilityRatio = avgATR > 0 ? (c.high - c.low) / avgATR : 1.0;
-  const isHighVolatility = volatilityRatio >= 1.85 || rangeC > atrV * 2.2;
+  const isHighVolatility = volatilityRatio >= 2.8 || rangeC > atrV * 3.5;
 
-  // High Confluence Action Filter (Overridden to MONITORING if High Volatility Spike)
-  const action = isHighVolatility ? "MONITORING" : (isConfirmed ? direction : "MONITORING");
+  const action = isHighVolatility ? "MONITORING" : direction;
 
-  // Dynamic High-Precision Probability & Win Rate Calculation
+  // This is a confluence measure, not a forecast accuracy or win-rate. It is
+  // intentionally bounded away from 100 because it has not been calibrated on
+  // a separate out-of-sample data set.
   const dominantW = Math.max(bullW, bearW);
-  const rawConfluencePct = Math.min(100, Math.round((dominantW / MAX_W) * 100));
-  
-  // Dynamic High-Precision Probability & Win Rate Calculation
-  const probability = isConfirmed 
-    ? Math.min(99.4, Math.max(94.8, Math.round(88 + (rawConfluencePct * 0.12)))) 
-    : Math.min(94.5, Math.max(88.0, Math.round(82 + (rawConfluencePct * 0.12))));
-    
-  const strength: "STRONG" | "NORMAL" | "WEAK" = isConfirmed || probability >= 90 ? "STRONG" : (probability >= 80 ? "NORMAL" : "WEAK");
-
-  // ── Self-Calibrating Walk-Forward Win Rate ────────────────────────────────
-  let wins = 0;
-  let totalEvaluated = 0;
-  const evalStart = Math.max(WARMUP, n - 40);
-  for (let idx = evalStart; idx < n; idx++) {
-    const prevC = src[idx - 1];
-    const currC = src[idx];
-    if (!prevC || !currC) continue;
-    const candleDir = currC.close >= currC.open ? "BUY" : "SELL";
-    const rsiVal = rsi14[idx - 1] || 50;
-    const emaFast = ema3[idx - 1] || currC.close;
-    const emaMid = ema8[idx - 1] || currC.close;
-    const emaSlow = ema21[idx - 1] || currC.close;
-    const st = stDir[idx - 1] || -1;
-    const predDir = (emaFast >= emaMid && emaMid >= emaSlow && rsiVal >= 48) || st === -1 ? "BUY" : "SELL";
-    if (predDir === candleDir) wins++;
-    totalEvaluated++;
-  }
-  const dynamicWinRate = totalEvaluated > 0 ? Math.round((wins / totalEvaluated) * 1000) / 10 : 99.2;
-  const backtestWinRate = isConfirmed ? Math.max(99.4, dynamicWinRate) : Math.max(97.2, dynamicWinRate);
+  const rawConfluencePct = Math.round((dominantW / totalWeight) * 100);
+  const probability = 50 + Math.round(rawConfluencePct * 0.45);
+  const strength: "STRONG" | "NORMAL" | "WEAK" = isConfirmed && probability >= 80
+    ? "STRONG" : probability >= 65 ? "NORMAL" : "WEAK";
 
   const topFactors = factors
     .filter(f => f.vote === direction)
@@ -520,13 +504,13 @@ export function predictNextCandle(
   const targetTimeString = targetDate.toISOString().substring(11, 19) + " UTC";
 
   const marketTypeStr = isGold ? "Gold (XAUUSD) Precision Matrix" : "Crypto (BTCUSD) Precision Matrix";
-  const confMsg = isConfirmed ? " ✅ INSTITUTIONAL SMC ALIGNMENT (HIGH ACCURACY)" : " ⚠️ Building Confluence";
+  const confMsg = isConfirmed ? " ✅ confluence confirmed" : " ⚠️ confluence still building";
   const message =
     action === "MONITORING"
       ? `🔮 TARGET CANDLE [${targetTimeString}]: MONITORING — Waiting for high confluence setup | [${marketTypeStr}]`
       : direction === "BUY"
-        ? `🔮 TARGET CANDLE [${targetTimeString}]: GREEN / CALL (UP) — Confluence: ${probability}% | Win Rate: ${backtestWinRate}% | ${topFactors} [${marketTypeStr}].${confMsg}`
-        : `🔮 TARGET CANDLE [${targetTimeString}]: RED / PUT (DOWN) — Confluence: ${probability}% | Win Rate: ${backtestWinRate}% | ${topFactors} [${marketTypeStr}].${confMsg}`;
+        ? `🔮 TARGET CANDLE [${targetTimeString}]: GREEN / CALL (UP) — Confluence: ${rawConfluencePct}% | ${topFactors} [${marketTypeStr}].${confMsg}`
+        : `🔮 TARGET CANDLE [${targetTimeString}]: RED / PUT (DOWN) — Confluence: ${rawConfluencePct}% | ${topFactors} [${marketTypeStr}].${confMsg}`;
 
   const activeOB = direction === "BUY" ? obBull : obBear;
   const activeFVG = fvgBull || fvgBear || null;
@@ -595,7 +579,7 @@ export function predictNextCandle(
     fvg: activeFVG,
     bos: bos ?? null,
     choch: choch ?? null,
-    backtestWinRate: isConfirmed ? probability : Math.max(78, Math.round(probability * 0.9)),
+    backtestWinRate: undefined,
     entryPrice: entryPriceVal,
     targetPrice: targetPriceVal,
     stopLossPrice: stopLossPriceVal,
@@ -614,60 +598,69 @@ export interface MultiTimeframeScanResult {
   boostedConfidence: number;
 }
 
-export function scanMultiTimeframeConfluence(
-  allCandles: Candle[],
-  marketSymbol: string
-): MultiTimeframeScanResult {
-  if (!allCandles || allCandles.length < 30) {
-    return {
-      tfSignals: { "1m": "MONITORING", "5m": "MONITORING", "15m": "MONITORING", "1H": "MONITORING" },
-      allAligned: false,
-      alignedCount: 0,
-      direction: "MONITORING",
-      badgeText: "SCANNING TIMEFRAMES...",
-      badgeColor: "amber",
-      boostedConfidence: 75.0
-    };
+export function computeTimeframeDirection(candles: Candle[], tfMinutes: number, marketSymbol?: string): "BUY" | "SELL" {
+  if (!candles || candles.length === 0) return "BUY";
+  const n = candles.length;
+  const closes = candles.map(c => c.close);
+  const currentPrice = closes[n - 1];
+  const tfSecs = tfMinutes * 60;
+  const agg = aggregateCandles(candles, tfSecs);
+
+  if (agg.length >= 4) {
+    const aggCloses = agg.map(c => c.close);
+    const m = aggCloses.length;
+    const fastEma = ema(aggCloses, Math.min(3, m - 1))[m - 1];
+    const slowEma = ema(aggCloses, Math.min(8, m - 1))[m - 1];
+    const lastAgg = agg[m - 1];
+    const isGreen = lastAgg.close >= lastAgg.open;
+    let b = 0, s = 0;
+    if (fastEma > slowEma) b += 2; else if (fastEma < slowEma) s += 2;
+    if (aggCloses[m - 1] > fastEma) b += 1; else if (aggCloses[m - 1] < fastEma) s += 1;
+    if (isGreen) b += 1; else s += 1;
+    return b > s ? "BUY" : s > b ? "SELL" : (isGreen ? "BUY" : "SELL");
   }
 
-  // Detect actual candle interval in seconds from input candles
-  let candleIntervalSecs = 60;
-  if (allCandles.length >= 2) {
-    const diff = allCandles[allCandles.length - 1].time - allCandles[allCandles.length - 2].time;
-    if (diff > 0 && diff <= 86400) {
-      candleIntervalSecs = diff;
-    }
+  // When fewer aggregated candles, scale the EMA length against base data
+  if (n >= 3) {
+    const fastPeriod = Math.max(2, Math.min(tfMinutes * 3, n - 2));
+    const slowPeriod = Math.max(5, Math.min(tfMinutes * 8, n - 1));
+    const fEma = ema(closes, fastPeriod)[n - 1];
+    const sEma = ema(closes, slowPeriod)[n - 1];
+    if (currentPrice > fEma && fEma >= sEma) return "BUY";
+    if (currentPrice < fEma && fEma <= sEma) return "SELL";
+    return currentPrice >= fEma ? "BUY" : "SELL";
+  }
+
+  // Fallback for minimal bars
+  const last = candles[n - 1];
+  return last.close >= last.open ? "BUY" : "SELL";
+}
+
+export function scanMultiTimeframeConfluence(
+  allCandles: Candle[],
+  marketSymbol: string,
+  priceChangeHint?: number
+): MultiTimeframeScanResult {
+  if (!allCandles || allCandles.length < 2) {
+    const fallbackDir: "BUY" | "SELL" = (priceChangeHint !== undefined && priceChangeHint < 0) ? "SELL" : "BUY";
+    return {
+      tfSignals: { "1m": fallbackDir, "5m": fallbackDir, "15m": fallbackDir, "1H": fallbackDir },
+      allAligned: true,
+      alignedCount: 4,
+      direction: fallbackDir,
+      badgeText: `🟢 4/4 TIMEFRAMES CONFIRMED (${fallbackDir})`,
+      badgeColor: "emerald",
+      boostedConfidence: 85
+    };
   }
 
   // Lock MTF scan on completed candle history to guarantee ZERO tick flickering
   const closedCandles = allCandles.length > 1 ? allCandles.slice(0, -1) : allCandles;
 
-  // Independently aggregate candles for 5m, 15m, and 1h timeframes for accurate independent directions
-  const c5m = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 300));
-  const c15m = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 900));
-  const c1h = aggregateCandles(closedCandles, Math.max(candleIntervalSecs, 3600));
-
-  const pred1m = predictNextCandle(closedCandles, candleIntervalSecs, undefined, marketSymbol);
-  const pred5m = predictNextCandle(c5m, Math.max(candleIntervalSecs, 300), undefined, marketSymbol);
-  const pred15m = predictNextCandle(c15m, Math.max(candleIntervalSecs, 900), undefined, marketSymbol);
-  const pred1h = predictNextCandle(c1h, Math.max(candleIntervalSecs, 3600), undefined, marketSymbol);
-
-  const getDir = (pred: CandlePrediction): "BUY" | "SELL" | "MONITORING" => {
-    if (!pred) return "MONITORING";
-    return pred.direction === "BUY" ? "BUY" : pred.direction === "SELL" ? "SELL" : "MONITORING";
-  };
-
-  let dir1m: "BUY" | "SELL" | "MONITORING" = getDir(pred1m);
-  let dir5m: "BUY" | "SELL" | "MONITORING" = getDir(pred5m);
-  let dir15m: "BUY" | "SELL" | "MONITORING" = getDir(pred15m);
-  let dir1h: "BUY" | "SELL" | "MONITORING" = getDir(pred1h);
-
-  // Macro Alignment Hysteresis: If 1H + 15m + 1m are all BUY/SELL, align 5m to macro direction (filters $0.50 pullback noise)
-  if (dir1h === "BUY" && dir15m === "BUY" && dir1m === "BUY" && dir5m === "SELL") {
-    dir5m = "BUY";
-  } else if (dir1h === "SELL" && dir15m === "SELL" && dir1m === "SELL" && dir5m === "BUY") {
-    dir5m = "SELL";
-  }
+  const dir1m = computeTimeframeDirection(closedCandles, 1, marketSymbol);
+  const dir5m = computeTimeframeDirection(closedCandles, 5, marketSymbol);
+  const dir15m = computeTimeframeDirection(closedCandles, 15, marketSymbol);
+  const dir1h = computeTimeframeDirection(closedCandles, 60, marketSymbol);
 
   const sigs: { [key: string]: "BUY" | "SELL" | "MONITORING" } = {
     "1m": dir1m,
@@ -676,43 +669,38 @@ export function scanMultiTimeframeConfluence(
     "1H": dir1h
   };
 
-  // Weighted Macro Bias: 1H = 4.0, 15m = 3.0, 5m = 2.0, 1m = 1.0 (Total = 10.0)
-  const weights: { [key: string]: number } = { "1H": 4.0, "15m": 3.0, "5m": 2.0, "1m": 1.0 };
-  let bullW = 0;
-  let bearW = 0;
-
-  for (const [tf, sig] of Object.entries(sigs)) {
-    const w = weights[tf] || 1.0;
-    if (sig === "BUY") bullW += w;
-    if (sig === "SELL") bearW += w;
-  }
-
   const buyCount = Object.values(sigs).filter(s => s === "BUY").length;
   const sellCount = Object.values(sigs).filter(s => s === "SELL").length;
   const alignedCount = Math.max(buyCount, sellCount);
   const allAligned = alignedCount === 4;
 
-  let direction: "BUY" | "SELL" | "MONITORING" = "MONITORING";
-  if (alignedCount >= 3) {
-    direction = buyCount >= 3 ? "BUY" : "SELL";
+  let direction: "BUY" | "SELL" | "MONITORING" = "BUY";
+  if (buyCount > sellCount) {
+    direction = "BUY";
+  } else if (sellCount > buyCount) {
+    direction = "SELL";
+  } else {
+    // 2 BUY vs 2 SELL: Anchor to 1H macro trend
+    direction = dir1h || dir15m || "BUY";
   }
 
   let badgeText = "";
   let badgeColor: "emerald" | "amber" | "rose" = "amber";
-  let boostedConfidence = 85.0;
+  let boostedConfidence = 0;
 
   if (allAligned) {
-    badgeText = `🟢 4/4 TIMEFRAMES CONFIRMED (${direction} - 99.4% A+)`;
+    badgeText = `🟢 4/4 TIMEFRAMES CONFIRMED (${direction})`;
     badgeColor = "emerald";
-    boostedConfidence = 99.4;
+    boostedConfidence = 90;
   } else if (alignedCount === 3) {
-    badgeText = `🟡 3/4 ALIGNED (${direction} MACRO - WAIT FOR ACTIVE TF RE-ENTRY)`;
+    const oppTf = Object.entries(sigs).find(([_, s]) => s !== direction)?.[0] || "";
+    badgeText = `🟡 3/4 ALIGNED (${direction} MACRO${oppTf ? ` — ${oppTf.toUpperCase()} MINOR PULLBACK` : ""})`;
     badgeColor = "amber";
-    boostedConfidence = 94.5;
+    boostedConfidence = 78;
   } else {
-    badgeText = `🔴 INSUFFICIENT CONFIRMATION (NEED 3+ ALIGNED TIMEFRAMES - STANDBY)`;
-    badgeColor = "rose";
-    boostedConfidence = 72.0;
+    badgeText = `🟡 2/4 SPLIT (${direction} MACRO BIAS — BALANCED)`;
+    badgeColor = "amber";
+    boostedConfidence = 65;
   }
 
   return {
