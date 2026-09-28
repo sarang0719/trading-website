@@ -3,7 +3,12 @@ from typing import Dict, Any, Tuple, Optional, List
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    ExtraTreesClassifier,
+    RandomForestClassifier,
+    VotingClassifier
+)
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), 'saved_models')
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -12,7 +17,8 @@ MODEL_CACHE: Dict[str, Tuple[Any, List[str]]] = {}
 
 def train_model(df: pd.DataFrame, target_col: str, model_name: str) -> Tuple[Any, float]:
     """
-    Train an institutional-grade gradient boosting model with time-series walk-forward split (80/20).
+    Train an institutional-grade calibrated ensemble model (HistGradientBoosting + ExtraTrees + RandomForest)
+    with walk-forward temporal train/test split (75/25).
     Binary Target: 1 (BUY: next candle closes up), 0 (SELL: next candle closes down).
     Sample weights emphasize decisive expansion moves over micro-noise.
     """
@@ -23,31 +29,58 @@ def train_model(df: pd.DataFrame, target_col: str, model_name: str) -> Tuple[Any
     y = df[target_col]
     sample_weight = df['sample_weight'].to_numpy(dtype=float) if 'sample_weight' in df.columns else None
 
-    split_idx = int(len(X) * 0.8)
+    split_idx = int(len(X) * 0.75)
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
     w_train = sample_weight[:split_idx] if sample_weight is not None else None
 
-    # Institutional gradient booster with conservative regularization to prevent overfitting
-    model = HistGradientBoostingClassifier(
-        max_iter=200,
-        learning_rate=0.02,
-        max_depth=4,
-        min_samples_leaf=25,
-        l2_regularization=3.0,
+    # 1. Gradient Boosting: captures non-linear indicator feature interactions
+    m1 = HistGradientBoostingClassifier(
+        max_iter=300,
+        learning_rate=0.025,
+        max_depth=5,
+        min_samples_leaf=20,
+        l2_regularization=2.5,
         class_weight='balanced',
         random_state=42,
         early_stopping='auto',
-        n_iter_no_change=20
+        n_iter_no_change=25
+    )
+
+    # 2. ExtraTrees: randomized decision thresholds drastically reduce financial noise variance
+    m2 = ExtraTreesClassifier(
+        n_estimators=80,
+        max_depth=8,
+        min_samples_leaf=15,
+        max_features='sqrt',
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # 3. Random Forest: bootstrap bagging for regime stability
+    m3 = RandomForestClassifier(
+        n_estimators=80,
+        max_depth=8,
+        min_samples_leaf=15,
+        max_features='sqrt',
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # Soft-voting ensemble: combines probability vectors from distinct model topologies
+    model = VotingClassifier(
+        estimators=[('hgb', m1), ('et', m2), ('rf', m3)],
+        voting='soft',
+        weights=[2.5, 1.2, 1.0]
     )
 
     model.fit(X_train, y_train, sample_weight=w_train)
 
     accuracy = float(model.score(X_test, y_test))
-    print(f"Model {model_name} trained. Test Accuracy: {accuracy * 100:.2f}%")
+    print(f"Ensemble Model {model_name} trained. Test Accuracy: {accuracy * 100:.2f}%")
 
-    joblib.dump(model, os.path.join(MODEL_DIR, f"{model_name}.pkl"))
-    joblib.dump(features, os.path.join(MODEL_DIR, f"{model_name}_features.pkl"))
+    joblib.dump(model, os.path.join(MODEL_DIR, f"{model_name}.pkl"), compress=3)
+    joblib.dump(features, os.path.join(MODEL_DIR, f"{model_name}_features.pkl"), compress=3)
     MODEL_CACHE[model_name] = (model, features)
 
     return model, accuracy

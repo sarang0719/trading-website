@@ -237,6 +237,78 @@ def generate_features(df: pd.DataFrame) -> pd.DataFrame:
         (ema100_val < ema200_val).astype(int)
     )
 
+    # ── 20. Institutional Multi-Lag Returns & Velocity ──
+    ret1 = close_series.pct_change(1).fillna(0.0)
+    df['Ret_1'] = ret1
+    df['Ret_2'] = close_series.pct_change(2).fillna(0.0)
+    df['Ret_3'] = close_series.pct_change(3).fillna(0.0)
+    df['Ret_5'] = close_series.pct_change(5).fillna(0.0)
+    df['Ret_8'] = close_series.pct_change(8).fillna(0.0)
+    df['Ret_13'] = close_series.pct_change(13).fillna(0.0)
+    df['Ret_Accel'] = (ret1 - ret1.shift(1)).fillna(0.0)
+
+    # ── 21. Close Location Value (CLV: -1 = low, +1 = high) ──
+    clv = ((close_np - low_np) - (high_np - close_np)) / safe_range
+    clv_series = pd.Series(clv, index=df.index, dtype=float)
+    df['CLV'] = clv_series
+    df['CLV_MA5'] = clv_series.rolling(5, min_periods=1).mean()
+    df['CLV_MA10'] = clv_series.rolling(10, min_periods=1).mean()
+
+    # ── 22. Higher-Timeframe Trend & Alignment ──
+    ema_1h_fast = close_series.ewm(span=min(36, n_candles), adjust=False).mean()
+    ema_1h_slow = close_series.ewm(span=min(84, n_candles), adjust=False).mean()
+    df['HTF_1h_Trend'] = np.where(ema_1h_fast > ema_1h_slow, 1.0, -1.0)
+    df['HTF_1h_Dist'] = (close_series - ema_1h_fast) / safe_close
+
+    ema_4h_fast = close_series.ewm(span=min(144, n_candles), adjust=False).mean()
+    ema_4h_slow = close_series.ewm(span=min(336, n_candles), adjust=False).mean()
+    df['HTF_4h_Trend'] = np.where(ema_4h_fast > ema_4h_slow, 1.0, -1.0)
+
+    # ── 23. SMC Liquidity Sweeps (BSL/SSL Rejections) ──
+    hh20 = high_series.rolling(20, min_periods=5).max().shift(1).to_numpy()
+    ll20 = low_series.rolling(20, min_periods=5).min().shift(1).to_numpy()
+    df['BSL_Swept_20'] = ((high_np > hh20) & (close_np < hh20)).astype(float)
+    df['SSL_Swept_20'] = ((low_np < ll20) & (close_np > ll20)).astype(float)
+
+    hh50 = high_series.rolling(50, min_periods=10).max().shift(1).to_numpy()
+    ll50 = low_series.rolling(50, min_periods=10).min().shift(1).to_numpy()
+    df['BSL_Swept_50'] = ((high_np > hh50) & (close_np < hh50)).astype(float)
+    df['SSL_Swept_50'] = ((low_np < ll50) & (close_np > ll50)).astype(float)
+
+    # ── 24. Fair Value Gaps (FVG) ──
+    high_shift2 = high_series.shift(2).bfill().to_numpy()
+    low_shift2 = low_series.shift(2).bfill().to_numpy()
+    df['Bullish_FVG'] = np.maximum(0.0, (low_np - high_shift2)) / safe_close
+    df['Bearish_FVG'] = np.maximum(0.0, (low_shift2 - high_np)) / safe_close
+
+    # ── 25. Volume Dynamics & OBV Z-Score ──
+    vol_ma20 = vol_series.rolling(20, min_periods=1).mean()
+    df['Vol_Surge'] = vol_series / np.maximum(vol_ma20, 1e-6)
+
+    obv_step = np.sign(ret1) * vol_series
+    obv = obv_step.cumsum()
+    obv_ma = obv.rolling(20, min_periods=1).mean()
+    obv_std = obv.rolling(20, min_periods=1).std().fillna(1.0)
+    df['OBV_ZScore'] = (obv - obv_ma) / np.maximum(obv_std, 1e-6)
+
+    # ── 26. Directional Persistence & Streak ──
+    dir_sign = np.sign(ret1)
+    df['Dir_Persistence_3'] = dir_sign.rolling(3, min_periods=1).sum()
+    df['Dir_Persistence_5'] = dir_sign.rolling(5, min_periods=1).sum()
+
+    # ── 27. Volatility Squeeze (Bollinger inside Keltner) ──
+    bb_u = pd.Series(df['BB_Upper'], dtype=float)
+    bb_l = pd.Series(df['BB_Lower'], dtype=float)
+    kc_u = pd.Series(df['KC_Upper'], dtype=float)
+    kc_l = pd.Series(df['KC_Lower'], dtype=float)
+    df['In_Squeeze'] = ((bb_u < kc_u) & (bb_l > kc_l)).astype(float)
+
+    # ── 28. Macro 200 EMA & VWAP Extension ──
+    df['Dist_EMA200'] = (close_series - df['EMA_200']) / safe_close
+    df['Above_EMA200'] = (close_series > df['EMA_200']).astype(float)
+    df['VWAP_Dist'] = (close_series - df['VWAP']) / safe_close
+    df['RSI_Slope3'] = (rsi_s - rsi_s.shift(3).bfill()) / 10.0
+
     # Clean fillna & infinities without deprecated inplace
     df = df.replace([np.inf, -np.inf], 0.0)
     df = df.bfill().ffill().fillna(0.0)

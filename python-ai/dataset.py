@@ -167,7 +167,7 @@ def fetch_historical_data(symbol: str, timeframe: str = '5m', limit: int = 1000)
     if tf_clean in ["60m"]: tf_clean = "1h"
     elif tf_clean in ["240m"]: tf_clean = "4h"
 
-    # 1. Direct Binance Kline API (Ultra-Fast)
+    # 1. Direct Binance Kline API (Ultra-Fast with Reverse Pagination)
     try:
         bin_symbol = norm["binance"]
         all_rows = []
@@ -182,21 +182,24 @@ def fetch_historical_data(symbol: str, timeframe: str = '5m', limit: int = 1000)
                     for k in raw_data:
                         all_rows.append((pd.to_datetime(k[0], unit='ms'), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])))
         else:
-            # Multi-batch pagination for extended history
-            interval_ms = get_interval_ms(tf_clean)
-            start_time = int(time.time() * 1000) - (limit * interval_ms)
+            # High-performance reverse pagination from current time backwards
+            end_time = None
             while len(all_rows) < limit:
                 batch_size = min(1000, limit - len(all_rows))
-                url = f"https://api3.binance.com/api/v3/klines?symbol={bin_symbol}&interval={tf_clean}&startTime={start_time}&limit={batch_size}"
-                resp = SESSION.get(url, timeout=4)
+                url = f"https://api3.binance.com/api/v3/klines?symbol={bin_symbol}&interval={tf_clean}&limit={batch_size}"
+                if end_time is not None:
+                    url += f"&endTime={end_time}"
+                resp = SESSION.get(url, timeout=5)
                 if resp.status_code != 200:
                     break
                 raw_data = resp.json()
-                if not raw_data:
+                if not isinstance(raw_data, list) or not raw_data:
                     break
+                batch_rows = []
                 for k in raw_data:
-                    all_rows.append((pd.to_datetime(k[0], unit='ms'), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])))
-                start_time = raw_data[-1][0] + 1
+                    batch_rows.append((pd.to_datetime(k[0], unit='ms'), float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])))
+                all_rows = batch_rows + all_rows
+                end_time = int(raw_data[0][0]) - 1
                 if len(raw_data) < batch_size:
                     break
 

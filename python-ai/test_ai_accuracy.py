@@ -5,7 +5,7 @@ from feature_engine import generate_features
 from train import run_training, prepare_target
 from model import load_model, predict_batch
 
-def run_walk_forward_backtest(symbol: str, timeframe: str = '5m', total_candles: int = 1500):
+def run_walk_forward_backtest(symbol: str, timeframe: str = '15m', total_candles: int = 3500):
     print(f"\n=======================================================")
     print(f"  STRICT OUT-OF-SAMPLE AI BACKTEST: {symbol} ({timeframe})")
     print(f"=======================================================")
@@ -16,7 +16,7 @@ def run_walk_forward_backtest(symbol: str, timeframe: str = '5m', total_candles:
         print(f"[-] Insufficient data for {symbol} ({timeframe}) backtest.")
         return None
 
-    # 2. Compute 57 institutional features
+    # 2. Compute 91 institutional features
     df_feat = generate_features(df_raw)
     model_name = f"{symbol}_{timeframe}"
     model, features = load_model(model_name)
@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
     for symbol, tf in test_markets:
         try:
-            res = run_walk_forward_backtest(symbol, tf, total_candles=1500)
+            res = run_walk_forward_backtest(symbol, tf, total_candles=3500)
             if res:
                 results.append(res)
         except Exception as e:
