@@ -392,6 +392,7 @@ export default function MarketDetail() {
   const lastPyFetchTimeRef = useRef<number>(0);
   const serverTimeOffsetRef = useRef<number>(0);
   const runPredictorRef = useRef<((candles: any[], force?: boolean) => Promise<void>) | null>(null);
+  const isPredictingRef = useRef(false);
 
   // Sync local clock with exchange time via local backend to prevent client-side DNS/geo-block errors
   useEffect(() => {
@@ -1037,6 +1038,8 @@ export default function MarketDetail() {
 
     const runPredictor = async (candles: any[], force = false) => {
       if (!candles || candles.length < 5) return;
+      if (isPredictingRef.current && !force) return;
+
       const closedCandles = candles.length > 1 ? candles.slice(0, -1) : candles;
       const lastClosed = closedCandles[closedCandles.length - 1];
       if (!lastClosed) return;
@@ -1047,20 +1050,21 @@ export default function MarketDetail() {
         return;
       }
       lastClosedTimeRef.current = lastClosed.time;
-
-      const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, symbol || "BTCUSD");
-
-      // On initial load or explicit force, provide instant analysis immediately
-      if (instantPred && (!predictionRef.current || predictionRef.current.timeframe !== timeframe || force)) {
-        setPrediction({ ...instantPred, timeframe: timeframe || "1m" });
-        setAiSignal(instantPred.direction);
-        setAiConfidence(instantPred.probability);
-      }
-
-      // Fetch Python AI authoritative prediction (single finalization per candle close)
-      await fetchPythonPrediction(closedCandles, instantPred);
+      isPredictingRef.current = true;
 
       try {
+        const instantPred = predictNextCandle(closedCandles, candleSecs, optimizedWeightsRef.current, symbol || "BTCUSD");
+
+        // On initial load or explicit force, provide instant analysis immediately
+        if (instantPred && (!predictionRef.current || predictionRef.current.timeframe !== timeframe || force)) {
+          setPrediction({ ...instantPred, timeframe: timeframe || "1m" });
+          setAiSignal(instantPred.direction);
+          setAiConfidence(instantPred.probability);
+        }
+
+        // Fetch Python AI authoritative prediction (single finalization per candle close)
+        await fetchPythonPrediction(closedCandles, instantPred);
+
         const nowSec = Math.floor((Date.now() + serverTimeOffsetRef.current) / 1000);
         const entryP = lastClosed.close;
 
@@ -1097,6 +1101,8 @@ export default function MarketDetail() {
         });
       } catch (e: any) {
         console.error("AI Engine Prediction Error:", e);
+      } finally {
+        isPredictingRef.current = false;
       }
     };
 
@@ -1439,7 +1445,7 @@ export default function MarketDetail() {
                   if (timeframe === "1m" && candles.length >= 10) {
                     setBase1mCandles(candles);
                   }
-                  runPredictorRef.current?.(candles, true);
+                  runPredictorRef.current?.(candles, false);
                 }
               }}
               priceLevels={activeTrades.map((t): PriceLevel => ({

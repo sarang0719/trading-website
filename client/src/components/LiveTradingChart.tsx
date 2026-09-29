@@ -197,12 +197,14 @@ function LiveTradingChartComponent({
   const liveCandle      = useRef<CandleOHLC | null>(null);
   const targetPriceRef  = useRef<number>(0);   // latest REAL price from WS/REST tick
   const currentPriceRef = useRef<number>(0);   // last price actually rendered
-  const renderedPriceRef = useRef<number>(0);  // smoothed price animated toward targetPriceRef
-  const lastRenderTsRef  = useRef<number>(0);  // throttle stamp for chart redraws
+  const renderedPriceRef = useRef<number>(0);
+  const lastRenderTsRef  = useRef<number>(0);
   const prevPriceRef    = useRef<number>(0);
   const lastTickRef     = useRef<number>(Date.now());
   const candleSecsRef   = useRef<number>(60);
   const historyRef      = useRef<CandleOHLC[]>([]);
+  const lastPriceLineColorRef = useRef<string>("");
+  const lastUiUpdateRef = useRef<number>(0);
 
   // ── UI state (minimal re-renders) ─────────────────────────────────────────
   const [displayPrice, setDisplayPrice]   = useState(0);
@@ -228,32 +230,42 @@ function LiveTradingChartComponent({
       low:  Math.min(c.open, c.close, c.low),
     };
     const hist = [...historyRef.current];
+    let isNewCandle = false;
+
     if (hist.length === 0) {
       hist.push(sanitized);
+      isNewCandle = true;
     } else {
       const last = hist[hist.length - 1];
       if (sanitized.time > last.time) {
+        // A new candle has officially started; previous candle is now closed
         hist.push(sanitized);
         if (hist.length > 500) hist.shift();
+        isNewCandle = true;
       } else if (sanitized.time === last.time) {
+        // Active open candle: update close/high/low in place without recomputing full series
         hist[hist.length - 1] = sanitized;
       }
     }
     historyRef.current = hist;
 
-    // Calculate and update indicator data on the chart:
-    if (indRefs.current.sma) indRefs.current.sma.setData(calculateSMA(hist, 20));
-    if (indRefs.current.ema) indRefs.current.ema.setData(calculateEMA(hist, 55));
-    if (indRefs.current.rsi) indRefs.current.rsi.setData(calculateRSI(hist, 14));
-    if (indRefs.current.macdHist && indRefs.current.macdLine && indRefs.current.macdSig) {
-      const macd = calculateMACD(hist);
-      indRefs.current.macdHist.setData(macd.map(m => ({ time: m.time, value: m.hist, color: m.hist >= 0 ? "rgba(38,166,154,0.7)" : "rgba(239,83,80,0.7)" })));
-      indRefs.current.macdLine.setData(macd.map(m => ({ time: m.time, value: m.macd })));
-      indRefs.current.macdSig.setData(macd.map(m => ({ time: m.time, value: m.signal })));
-    }
+    // CRITICAL: Indicators (SMA, EMA, RSI, MACD) and candle-close callbacks ONLY update
+    // when a new candle begins. Calling setData on every micro-tick resets auto-scaling bounds
+    // and causes violent chart canvas vibration / candle shaking!
+    if (isNewCandle) {
+      if (indRefs.current.sma) indRefs.current.sma.setData(calculateSMA(hist, 20));
+      if (indRefs.current.ema) indRefs.current.ema.setData(calculateEMA(hist, 55));
+      if (indRefs.current.rsi) indRefs.current.rsi.setData(calculateRSI(hist, 14));
+      if (indRefs.current.macdHist && indRefs.current.macdLine && indRefs.current.macdSig) {
+        const macd = calculateMACD(hist);
+        indRefs.current.macdHist.setData(macd.map(m => ({ time: m.time, value: m.hist, color: m.hist >= 0 ? "rgba(38,166,154,0.7)" : "rgba(239,83,80,0.7)" })));
+        indRefs.current.macdLine.setData(macd.map(m => ({ time: m.time, value: m.macd })));
+        indRefs.current.macdSig.setData(macd.map(m => ({ time: m.time, value: m.signal })));
+      }
 
-    // Notify parent page:
-    onCandleUpdateRef.current?.(hist);
+      // Notify parent page only on candle close:
+      onCandleUpdateRef.current?.(hist);
+    }
   }, []);
 
   const [nowMs, setNowMs] = useState<number>(Date.now());
@@ -359,12 +371,14 @@ function LiveTradingChartComponent({
 
     try {
       const priceLineColor = price >= (candle.open || price) ? "#00e676" : "#ff5252";
-      candleRef.current?.applyOptions({ priceLineColor });
+      if (lastPriceLineColorRef.current !== priceLineColor) {
+        lastPriceLineColorRef.current = priceLineColor;
+        candleRef.current?.applyOptions({ priceLineColor });
+      }
       candleRef.current?.update({ time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close });
       liveLineRef.current?.update({ time: candle.time, value: price });
     } catch (err) { /* ignore */ }
 
-    setOhlcInfo({ o: candle.open, h: candle.high, l: candle.low, c: price, v: candle.volume ?? 0 });
     appendOrUpdateCandle(candle);
   });
 
@@ -396,15 +410,28 @@ function LiveTradingChartComponent({
 
     targetPriceRef.current  = rawPrice;
     lastTickRef.current     = Date.now();
-    // Seed the animator on the very first tick so it doesn't lerp from 0
-    if (renderedPriceRef.current <= 0) renderedPriceRef.current = rawPrice;
+    prevPriceRef.current    = rawPrice;
 
-    setDisplayPrice(rawPrice);
+    // Direct chart update: instantaneous, accurate, zero lag
+    updateCandleRef.current(rawPrice);
 
-    const dir: "up"|"down"|null = prev > 0 ? (rawPrice > prev ? "up" : rawPrice < prev ? "down" : null) : null;
-    if (dir) { setPriceDir(dir); setFlashKey(k => k + 1); }
-    prevPriceRef.current = rawPrice;
-    onPriceUpdateRef.current?.(rawPrice, dir);
+    // Throttle React UI state updates to max 10fps (every 100ms) to ensure smooth 60fps chart rendering and 0% CPU waste
+    const now = performance.now();
+    if (now - lastUiUpdateRef.current >= 100) {
+      lastUiUpdateRef.current = now;
+      setDisplayPrice(rawPrice);
+
+      const dir: "up"|"down"|null = prev > 0 ? (rawPrice > prev ? "up" : rawPrice < prev ? "down" : null) : null;
+      if (dir) {
+        setPriceDir(dir);
+        setFlashKey(k => (k + 1) % 1000);
+      }
+      onPriceUpdateRef.current?.(rawPrice, dir);
+      if (liveCandle.current) {
+        const c = liveCandle.current;
+        setOhlcInfo({ o: c.open, h: c.high, l: c.low, c: rawPrice, v: c.volume ?? 0 });
+      }
+    }
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -414,7 +441,7 @@ function LiveTradingChartComponent({
     if (!containerRef.current) return;
     let isActive = true;
     let ws: WebSocket | null = null;
-    let animFrame: number;
+    let localWs: WebSocket | null = null;
     let poller: ReturnType<typeof setInterval> | null = null;
     let wsReco: ReturnType<typeof setTimeout> | null = null;
     let wsInitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -655,45 +682,20 @@ function LiveTradingChartComponent({
       setIsLoading(false);
     };
 
-    const RENDER_MS = 30; // ~33fps ultra-smooth fluid chart redraw just like Binance.com
-
     const startEngine = () => {
       // Countdown ticks on its own precise 1s clock — decoupled from price rendering.
       countdownTimer = setInterval(() => {
         if (!isActive) return;
         const nowSec     = Math.floor(Date.now() / 1000);
         const candleSecs = candleSecsRef.current;
-        if (candleSecs > 0) setCountdown(candleSecs - (nowSec % candleSecs));
-      }, 1000);
-
-      const loop = () => {
-        if (!isActive) return;
-
-        // Smoothly interpolate rendered price toward latest target price quote
-        const target = targetPriceRef.current;
-        if (target > 0) {
-          const cur  = renderedPriceRef.current || target;
-          const diff = target - cur;
-          
-          const next = cur + diff * 0.25;
-
-          renderedPriceRef.current = next;
-          currentPriceRef.current  = next;
-
-          const now = performance.now();
-          if (now - lastRenderTsRef.current >= RENDER_MS) {
-            lastRenderTsRef.current = now;
-            // If external WebSocket is not actively open and streaming, fluidly update the live candle from the interpolated price
-            const isWsOpen = ws && ws.readyState === WebSocket.OPEN;
-            if (!isWsOpen) {
-              updateCandleRef.current(next);
-            }
+        if (candleSecs > 0) {
+          setCountdown(candleSecs - (nowSec % candleSecs));
+          const bucket = bucketTime(nowSec, candleSecs);
+          if (liveCandle.current && bucket > liveCandle.current.time && targetPriceRef.current > 0) {
+            updateCandleRef.current(targetPriceRef.current);
           }
         }
-
-        animFrame = requestAnimationFrame(loop);
-      };
-      animFrame = requestAnimationFrame(loop);
+      }, 1000);
     };
 
     const connectWS = () => {
@@ -704,6 +706,7 @@ function LiveTradingChartComponent({
         if (!isActive) return;
         // Skip REST polling if live WebSocket feed is actively connected
         if (ws && ws.readyState === WebSocket.OPEN) return;
+        if (localWs && localWs.readyState === WebSocket.OPEN) return;
 
         try {
           const r = await fetch(`/api/market-data/price/${symbol}`);
@@ -723,9 +726,9 @@ function LiveTradingChartComponent({
       try {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const localWsUrl = `${protocol}//${window.location.host}/ws`;
-        const localWs = new WebSocket(localWsUrl);
+        localWs = new WebSocket(localWsUrl);
         localWs.onopen = () => {
-          localWs.send(JSON.stringify({ type: "subscribe", symbols: [symbol] }));
+          localWs?.send(JSON.stringify({ type: "subscribe", symbols: [symbol] }));
         };
         localWs.onmessage = (ev) => {
           if (!isActive) return;
@@ -792,11 +795,27 @@ function LiveTradingChartComponent({
                     } catch {}
                     const candle = { time, open, high, low, close, volume };
                     liveCandle.current = candle;
-                    setOhlcInfo({ o: open, h: high, l: low, c: close, v: volume });
                     appendOrUpdateCandle(candle);
                   }
                 }
-                onTickRef.current(close);
+                
+                targetPriceRef.current = close;
+                lastTickRef.current = Date.now();
+                const prev = prevPriceRef.current;
+                prevPriceRef.current = close;
+
+                const now = performance.now();
+                if (now - lastUiUpdateRef.current >= 100) {
+                  lastUiUpdateRef.current = now;
+                  setDisplayPrice(close);
+                  const dir: "up"|"down"|null = prev > 0 ? (close > prev ? "up" : close < prev ? "down" : null) : null;
+                  if (dir) {
+                    setPriceDir(dir);
+                    setFlashKey(k => (k + 1) % 1000);
+                  }
+                  onPriceUpdateRef.current?.(close, dir);
+                  setOhlcInfo({ o: open, h: high, l: low, c: close, v: volume });
+                }
               }
             } catch {}
           };
@@ -826,7 +845,6 @@ function LiveTradingChartComponent({
 
     return () => {
       isActive = false;
-      cancelAnimationFrame(animFrame);
       if (wsInitTimer)   clearTimeout(wsInitTimer);
       if (wsReco)        clearTimeout(wsReco);
       if (poller)        clearInterval(poller);
@@ -842,6 +860,11 @@ function LiveTradingChartComponent({
         } else if (socket.readyState === WebSocket.OPEN) {
           try { socket.close(); } catch {}
         }
+      }
+      if (localWs) {
+        localWs.onclose = null;
+        try { localWs.close(); } catch {}
+        localWs = null;
       }
       try { chart.remove(); } catch {}
       chartRef.current  = null;
