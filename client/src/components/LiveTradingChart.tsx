@@ -205,6 +205,7 @@ function LiveTradingChartComponent({
   const historyRef      = useRef<CandleOHLC[]>([]);
   const lastPriceLineColorRef = useRef<string>("");
   const lastUiUpdateRef = useRef<number>(0);
+  const serverTimeOffsetRef = useRef<number>(0);
 
   // ── UI state (minimal re-renders) ─────────────────────────────────────────
   const [displayPrice, setDisplayPrice]   = useState(0);
@@ -333,26 +334,18 @@ function LiveTradingChartComponent({
       if (dev > 0.15) return;
     }
 
-    const nowSec     = Math.floor(Date.now() / 1000);
+    const nowMs      = Date.now() + serverTimeOffsetRef.current;
+    const nowSec     = Math.floor(nowMs / 1000);
     const candleSecs = candleSecsRef.current || 60;
-    const bucket     = bucketTime(nowSec, candleSecs);
+    let bucket       = bucketTime(nowSec, candleSecs);
     let candle       = liveCandle.current;
 
-    // Guard against regressing time behind loaded historical candles
+    // Time alignment: If client clock is slightly behind exchange/server clock,
+    // ensure bucket is at least equal to lastHist.time so candles never freeze or get dropped!
     const hist = historyRef.current;
     const lastHist = hist.length > 0 ? hist[hist.length - 1] : null;
     if (lastHist && bucket < (lastHist.time as number)) {
-      if (candle && candle.time === lastHist.time) {
-        candle.close = price;
-        candle.high  = Math.max(candle.high, candle.open, price);
-        candle.low   = Math.min(candle.low,  candle.open, price);
-        if (candle.volume !== undefined) candle.volume += 1;
-        try {
-          candleRef.current?.update({ time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close });
-          liveLineRef.current?.update({ time: candle.time, value: price });
-        } catch {}
-      }
-      return;
+      bucket = lastHist.time as UTCTimestamp;
     }
 
     if (!candle || bucket > candle.time) {
@@ -481,8 +474,8 @@ function LiveTradingChartComponent({
         borderColor:    "rgba(255,255,255,0.08)",
         timeVisible:    true,
         secondsVisible: false,
-        rightOffset:    20,
-        barSpacing:     14, // Thicker candles exactly like Quotex
+        rightOffset:    5,
+        barSpacing:     12, // Thicker candles exactly like Quotex
         minBarSpacing:  3,
       },
       autoSize: true,
@@ -547,6 +540,9 @@ function LiveTradingChartComponent({
         });
         if (pr.ok) {
           const pd = await pr.json();
+          if (pd.asOf) {
+            serverTimeOffsetRef.current = new Date(pd.asOf).getTime() - Date.now();
+          }
           const liveP = parseFloat(pd.price);
           if (liveP > 0) {
             targetPriceRef.current  = liveP;
@@ -618,9 +614,10 @@ function LiveTradingChartComponent({
         let h = isNaN(rawHigh) ? Math.max(o, cl) : Math.max(o, cl, rawHigh);
         let l = isNaN(rawLow) ? Math.min(o, cl) : Math.min(o, cl, rawLow);
 
-        if (h <= l || Math.abs(h - l) < 0.0001) {
-          h = Math.max(o, cl) + 0.15;
-          l = Math.min(o, cl) - 0.15;
+        const minSpread = Math.max(0.0001, cl * 0.0001);
+        if (h <= l || Math.abs(h - l) < minSpread) {
+          h = Math.max(o, cl) + minSpread;
+          l = Math.min(o, cl) - minSpread;
         }
 
         sanitizedMap.set(t, {
@@ -644,7 +641,7 @@ function LiveTradingChartComponent({
           liveLine.setData(validHistory.map(c => ({ time: c.time, value: c.close })));
           requestAnimationFrame(() => {
             try {
-              chart.timeScale().fitContent();
+              chart.timeScale().scrollToRealTime();
             } catch {}
           });
         } catch (setErr) {
