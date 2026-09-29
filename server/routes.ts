@@ -683,10 +683,10 @@ export async function registerRoutes(
 
   app.post(api.settings.aiTrade.path, isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub as string;
+      const userId = req.user.claims?.sub || req.user.id;
       const input = api.settings.aiTrade.input.parse(req.body);
       await storage.updateAiTradeConsent(userId, input.enabled, input.amount);
-      res.json({ ok: true });
+      res.json({ ok: true, autoTradeEnabled: input.enabled });
     } catch (err: any) {
       return res.status(400).json({ message: err.message || "Invalid request" });
     }

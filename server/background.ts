@@ -165,8 +165,14 @@ export function startBackgroundTasks() {
           const targets: any[] = [];
           if (cryptoMap.has(symbol)) targets.push(cryptoMap.get(symbol)!);
 
-          if (symbol === "BTCUSDC" && cryptoMap.has("BTCUSD")) {
+          if ((symbol === "BTCUSDT" || symbol === "BTCUSDC") && cryptoMap.has("BTCUSD")) {
             targets.push(cryptoMap.get("BTCUSD")!);
+          }
+          if ((symbol === "ETHUSDT" || symbol === "ETHUSDC") && cryptoMap.has("ETHUSD")) {
+            targets.push(cryptoMap.get("ETHUSD")!);
+          }
+          if ((symbol === "SOLUSDT" || symbol === "SOLUSDC") && cryptoMap.has("SOLUSD")) {
+            targets.push(cryptoMap.get("SOLUSD")!);
           }
           if (symbol === "PAXGUSDT") {
             if (cryptoMap.has("XAUTUSDC")) targets.push(cryptoMap.get("XAUTUSDC")!);

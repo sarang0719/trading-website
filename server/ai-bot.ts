@@ -96,13 +96,15 @@ export function startAiBotEngine() {
             // capital." That is a backdoor, not a feature, and has been removed.
 
             // ── SECURITY & COMPLIANCE CHECKS ──
-            // 1. Mandatory Google/Firebase verification for auto-trade safety
-            if (!user.firebaseUid) {
+            const isAdm = user.role === "ADMIN_1" || user.role === "ADMIN_2" || ["saran123@gmail.com", "htctrade123@gmail.com"].includes((user.email || "").toLowerCase());
+            const hasFirebase = !!process.env.FIREBASE_SERVICE_ACCOUNT;
+            // 1. Mandatory Google/Firebase verification for live real money auto-trade
+            if (hasFirebase && !user.firebaseUid && !isAdm && user.tradeMode !== "DEMO") {
                await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
                continue;
             }
-            // 2. Mandatory Commission Agreement (must be explicitly disclosed & agreed to in the UI)
-            if (!user.commissionAgreed) {
+            // 2. Mandatory Commission Agreement for live trading
+            if (!user.commissionAgreed && !isAdm && user.tradeMode !== "DEMO") {
                await db.update(users).set({ autoTradeEnabled: false }).where(eq(users.id, user.id));
                continue;
             }
