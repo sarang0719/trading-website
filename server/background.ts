@@ -220,8 +220,8 @@ export function startBackgroundTasks() {
     const ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_API_KEY}`);
 
     ws.on("open", async () => {
-      console.log("Connected to live Finnhub WebSocket mirror for Forex & Gold!");
-      const symbolsToSubscribe = ["OANDA:XAU_USD", "OANDA:XAG_USD", "OANDA:EUR_USD", "OANDA:GBP_USD", "OANDA:USD_JPY"];
+      console.log("Connected to live Finnhub WebSocket mirror for Forex & Silver!");
+      const symbolsToSubscribe = ["OANDA:XAG_USD", "OANDA:EUR_USD", "OANDA:GBP_USD", "OANDA:USD_JPY"];
       for (const sym of symbolsToSubscribe) {
         ws.send(JSON.stringify({'type':'subscribe', 'symbol': sym}));
       }
