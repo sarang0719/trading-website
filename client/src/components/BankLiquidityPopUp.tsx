@@ -35,14 +35,21 @@ interface Props {
 export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }: Props) {
   if (!data) return null;
 
-  const { symbol, direction, entryPrice: initialEntryPrice, stopLoss: initialStopLoss, takeProfit: initialTakeProfit, supLevel, resLevel, sweptLo, sweptHi } = data;
+  const { symbol, direction, entryPrice: initialEntryPrice = 0, stopLoss: initialStopLoss = 0, takeProfit: initialTakeProfit = 0, supLevel, resLevel, sweptLo, sweptHi } = data;
 
-  const [liveEntryPrice, setLiveEntryPrice] = React.useState<number>(initialEntryPrice);
+  const formatPrice = (n: number | null | undefined) => {
+    if (typeof n !== "number" || isNaN(n)) return "0.00";
+    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  };
+
+  const [liveEntryPrice, setLiveEntryPrice] = React.useState<number>(initialEntryPrice || 0);
   const [lastUpdatedTime, setLastUpdatedTime] = React.useState<string>("");
 
   // Sync initial entry price when data changes
   React.useEffect(() => {
-    setLiveEntryPrice(initialEntryPrice);
+    if (initialEntryPrice && !isNaN(initialEntryPrice)) {
+      setLiveEntryPrice(initialEntryPrice);
+    }
     setLastUpdatedTime(new Date().toLocaleTimeString());
   }, [data, initialEntryPrice]);
 
@@ -81,15 +88,15 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
     };
   }, [open, symbol]);
 
-  const entryPrice = liveEntryPrice || initialEntryPrice;
+  const entryPrice = (liveEntryPrice && !isNaN(liveEntryPrice)) ? liveEntryPrice : (initialEntryPrice || 0);
   const isBuy = direction === "BUY";
-  const symUpper = symbol.toUpperCase();
+  const symUpper = (symbol || "BTCUSD").toUpperCase();
   const isForex = symUpper.includes("EUR") || symUpper.includes("GBP") || (symUpper.includes("USD") && !symUpper.includes("XAU") && !symUpper.includes("BTC") && !symUpper.includes("ETH") && symUpper.length === 6);
   const isGold = symUpper.includes("XAU");
 
   // Dynamic calculation based on live updated entry price
-  const slDiff = Math.abs(entryPrice - initialStopLoss);
-  const tpDiff = Math.abs(initialTakeProfit - entryPrice);
+  const slDiff = Math.abs(entryPrice - (initialStopLoss || entryPrice));
+  const tpDiff = Math.abs((initialTakeProfit || entryPrice) - entryPrice);
 
   let ptsStr = "";
   let pipsStr = "";
@@ -120,8 +127,8 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
     : "Institutional Liquidity Hunt";
 
   const targetLevel = sweptLo
-    ? (supLevel ? `$${supLevel.toLocaleString()}` : `$${initialStopLoss.toLocaleString()}`)
-    : (resLevel ? `$${resLevel.toLocaleString()}` : `$${initialStopLoss.toLocaleString()}`);
+    ? (supLevel ? `$${formatPrice(supLevel)}` : `$${formatPrice(initialStopLoss)}`)
+    : (resLevel ? `$${formatPrice(resLevel)}` : `$${formatPrice(initialStopLoss)}`);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -169,13 +176,13 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
             <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-lg border border-amber-500/30 text-xs">
               <div className="flex flex-col">
                 <span className="text-[10px] text-amber-400/90 uppercase font-bold tracking-wider">Institutional Bank Entry</span>
-                <span className="font-mono font-black text-amber-300 text-sm">${initialEntryPrice.toLocaleString()}</span>
+                <span className="font-mono font-black text-amber-300 text-sm">${formatPrice(initialEntryPrice)}</span>
               </div>
               <div className="flex flex-col text-right">
                 <span className="text-[10px] text-emerald-400/90 uppercase font-bold tracking-wider flex items-center justify-end gap-1">
                   Live Market Entry <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 </span>
-                <span className="font-mono font-black text-emerald-400 text-sm">${entryPrice.toLocaleString()}</span>
+                <span className="font-mono font-black text-emerald-400 text-sm">${formatPrice(entryPrice)}</span>
               </div>
             </div>
 
@@ -227,7 +234,7 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
               <div className="bg-black/60 p-2 rounded border border-amber-500/20">
                 <div className="text-[10px] text-amber-400/80 font-bold uppercase">Bank Entry Level</div>
                 <div className="font-mono font-black text-amber-300 text-sm mt-0.5">
-                  ${initialEntryPrice.toLocaleString()}
+                  ${formatPrice(initialEntryPrice)}
                 </div>
               </div>
               <div className="bg-black/60 p-2 rounded border border-amber-500/20">
@@ -241,7 +248,7 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
             {data.bankZoneTop && data.bankZoneBottom && (
               <div className="bg-amber-500/10 border border-amber-500/30 p-2 rounded text-[11px] font-mono text-amber-300 flex justify-between items-center">
                 <span>Defense Zone Range:</span>
-                <span className="font-bold">${data.bankZoneBottom.toLocaleString()} — ${data.bankZoneTop.toLocaleString()}</span>
+                <span className="font-bold">${formatPrice(data.bankZoneBottom)} — ${formatPrice(data.bankZoneTop)}</span>
               </div>
             )}
 
@@ -264,22 +271,22 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
             )}
             <div className="flex justify-between items-center bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">
               <span className="text-amber-300 font-bold">Institutional Entry Level:</span>
-              <span className="font-mono font-black text-amber-300 text-xs">${initialEntryPrice.toLocaleString()}</span>
+              <span className="font-mono font-black text-amber-300 text-xs">${formatPrice(initialEntryPrice)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-zinc-400 flex items-center gap-1">
                 Current Updated Entry:
                 <span className="text-[9px] text-emerald-400 animate-pulse font-semibold">(Live)</span>
               </span>
-              <span className="font-mono font-bold text-emerald-400">${entryPrice.toLocaleString()}</span>
+              <span className="font-mono font-bold text-emerald-400">${formatPrice(entryPrice)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-zinc-400">Suggested Stop Loss:</span>
-              <span className="font-mono font-bold text-rose-400">${initialStopLoss.toLocaleString()}</span>
+              <span className="font-mono font-bold text-rose-400">${formatPrice(initialStopLoss)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-zinc-400">Target Take Profit (+{tpPtsStr}):</span>
-              <span className="font-mono font-bold text-emerald-400">${initialTakeProfit.toLocaleString()}</span>
+              <span className="font-mono font-bold text-emerald-400">${formatPrice(initialTakeProfit)}</span>
             </div>
           </div>
 
@@ -287,7 +294,7 @@ export function BankLiquidityPopUp({ open, onOpenChange, data, onExecuteTrade }:
           <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-[11px] text-amber-200/80 leading-relaxed flex items-start gap-2">
             <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
-              <strong>Bank Order Flow Insight:</strong> Commercial banks swept retail stop-loss orders around <span className="font-mono text-amber-300">{targetLevel}</span>. Live Entry updated at <span className="font-mono text-emerald-300 font-bold">${entryPrice.toLocaleString()}</span> ({lastUpdatedTime}). Target <span className="font-mono text-emerald-300">${initialTakeProfit.toLocaleString()}</span> (+{tpPtsStr} / {tpPipsStr}).
+              <strong>Bank Order Flow Insight:</strong> Commercial banks swept retail stop-loss orders around <span className="font-mono text-amber-300">{targetLevel}</span>. Live Entry updated at <span className="font-mono text-emerald-300 font-bold">${formatPrice(entryPrice)}</span> ({lastUpdatedTime}). Target <span className="font-mono text-emerald-300">${formatPrice(initialTakeProfit)}</span> (+{tpPtsStr} / {tpPipsStr}).
             </div>
           </div>
         </div>

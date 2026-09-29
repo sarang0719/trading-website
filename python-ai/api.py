@@ -192,11 +192,18 @@ async def get_prediction(req: PredictionRequest):
 
     # Timestamp normalization
     if 'timestamp' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        if pd.api.types.is_numeric_dtype(df['timestamp']):
+            sample_val = float(df['timestamp'].iloc[0]) if len(df) > 0 else 0
+            unit = 'ms' if sample_val > 1e11 else 's'
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit=unit, errors='coerce')
+        else:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
     elif 'time' in df.columns:
-        try:
-            df['timestamp'] = pd.to_datetime(df['time'], unit='s')
-        except Exception:
+        if pd.api.types.is_numeric_dtype(df['time']):
+            sample_val = float(df['time'].iloc[0]) if len(df) > 0 else 0
+            unit = 'ms' if sample_val > 1e11 else 's'
+            df['timestamp'] = pd.to_datetime(df['time'], unit=unit, errors='coerce')
+        else:
             df['timestamp'] = pd.to_datetime(df['time'], errors='coerce')
     else:
         df['timestamp'] = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='1min')

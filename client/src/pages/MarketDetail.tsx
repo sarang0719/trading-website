@@ -970,14 +970,37 @@ export default function MarketDetail() {
         if (res.ok) {
           const aiData = await res.json();
           const isNoTrade = aiData.signal === "NO TRADE" || aiData.signal === "MONITORING";
-          const validSignal = isNoTrade ? "MONITORING" : (aiData.signal === "SELL" ? "SELL" : "BUY");
+          const probBuy = Number(aiData.probability_up ?? (aiData.probabilities?.buy ? aiData.probabilities.buy * 100 : 50));
+          const probSell = Number(aiData.probability_down ?? (aiData.probabilities?.sell ? aiData.probabilities.sell * 100 : 50));
+
+          let trueDir: "BUY" | "SELL" = "BUY";
+          if (aiData.signal === "SELL") {
+            trueDir = "SELL";
+          } else if (aiData.signal === "BUY") {
+            trueDir = "BUY";
+          } else {
+            if (probSell > probBuy) {
+              trueDir = "SELL";
+            } else if (probBuy > probSell) {
+              trueDir = "BUY";
+            } else {
+              trueDir = fallbackPred?.direction || "BUY";
+            }
+          }
+
+          const validSignal = isNoTrade ? "MONITORING" : trueDir;
           const confidence = typeof aiData.confidence === "number" ? aiData.confidence : (fallbackPred?.probability || 50);
+
           setPrediction(prev => ({
             ...(prev || fallbackPred || {}),
-            direction: validSignal === "SELL" ? "SELL" : "BUY",
+            direction: trueDir,
             action: validSignal,
             timeframe: timeframe || "1m",
             canonicalSignal: aiData.signal,
+            probability_up: probBuy,
+            probability_down: probSell,
+            probabilities: aiData.probabilities,
+            mtf: aiData.mtf,
             marketRegime: aiData.regime || "TREND",
             mtfAlignment: aiData.mtf_alignment || "3/4",
             modelVersion: aiData.model_version || "v3",
@@ -985,8 +1008,8 @@ export default function MarketDetail() {
             probability: confidence,
             strength: aiData.strength || fallbackPred?.strength || "HIGH CONFLUENCE",
             message: isNoTrade
-              ? `⚖️ CANONICAL AI: NO TRADE · Reason: ${aiData.explanation?.[0] || aiData.reason?.[0] || 'Market Regime or low directional conviction'}`
-              : `🔮 CANONICAL AI SIGNAL: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} · Calibrated Prob: ${confidence}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
+              ? `⚖️ CANONICAL AI: NO TRADE (${trueDir} LEAN) · Reason: ${aiData.explanation?.[0] || aiData.reason?.[0] || 'Market Regime or low directional conviction'}`
+              : `🔮 CANONICAL AI SIGNAL: ${trueDir === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} · Calibrated Prob: ${confidence}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
             forCandleAt: closedCandles[closedCandles.length - 1].time + candleSecs,
             isConfirmed: !isNoTrade,
             confluenceScore: typeof aiData.score === "number" ? aiData.score : (fallbackPred?.confluenceScore || 21),
@@ -997,7 +1020,7 @@ export default function MarketDetail() {
             next_resistance: aiData.next_resistance ?? prev?.next_resistance ?? fallbackPred?.next_resistance,
             generatedAt: Date.now()
           } as any));
-          setAiSignal(validSignal === "SELL" ? "SELL" : "BUY");
+          setAiSignal(trueDir);
           setAiConfidence(confidence);
           return;
         }
@@ -1079,10 +1102,25 @@ export default function MarketDetail() {
 
     runPredictorRef.current = runPredictor;
 
-    // Run immediately on existing candles (forced on initial load or timeframe switch)
-    if (candlesRef.current?.length >= 5) {
-      runPredictor(candlesRef.current, true);
-    }
+    // Immediately fetch history for the target timeframe so prediction updates instantly
+    lastClosedTimeRef.current = 0;
+    fetch(`/api/market-data/history/${symbol}?interval=${timeframe}`)
+      .then(r => r.json())
+      .then(d => {
+        const tfCandles = d.results || d.candles || (Array.isArray(d) ? d : []);
+        if (tfCandles && tfCandles.length >= 5) {
+          candlesRef.current = tfCandles;
+          setChartCandles(tfCandles);
+          runPredictor(tfCandles, true);
+        } else if (candlesRef.current?.length >= 5) {
+          runPredictor(candlesRef.current, true);
+        }
+      })
+      .catch(() => {
+        if (candlesRef.current?.length >= 5) {
+          runPredictor(candlesRef.current, true);
+        }
+      });
 
     // Monitor for candle close every 1000ms (strictly gates on new candle timestamp)
     const v17Monitor = setInterval(() => {
@@ -2065,7 +2103,16 @@ export default function MarketDetail() {
                     {/* 4 Timeframe Badges */}
                     <div className="grid grid-cols-4 gap-1">
                       {["1m", "5m", "15m", "1H"].map((tf) => {
-                        const sig = mtfConfluence.tfSignals[tf] || mtfConfluence.direction || "BUY";
+                        const pyMtf = (prediction as any)?.mtf;
+                        let pySig: "BUY" | "SELL" | null = null;
+                        if (pyMtf) {
+                          const k = tf.toLowerCase();
+                          const val = pyMtf[k] || pyMtf[tf];
+                          if (val === "BUY" || val === "SELL") pySig = val;
+                        }
+                        const sig = (timeframe.toLowerCase() === tf.toLowerCase() && prediction?.direction)
+                          ? prediction.direction
+                          : (pySig || mtfConfluence.tfSignals[tf] || mtfConfluence.direction || "BUY");
                         const isActiveTF = timeframe.toLowerCase() === tf.toLowerCase();
                         return (
                           <div
@@ -2412,11 +2459,9 @@ export default function MarketDetail() {
                   {/* Main Prediction Box */}
                   <div className={cn(
                     "flex flex-col items-center justify-center p-3.5 rounded-xl border text-center shadow-lg transition-all relative overflow-hidden",
-                    isBuy 
+                    currentTfDir === "BUY"
                       ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.15)]" 
-                      : (isSell 
-                          ? "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]" 
-                          : "bg-amber-500/15 border-amber-500/30 text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.15)]")
+                      : "bg-rose-500/15 border-rose-500/30 text-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
                   )}>
                     <div className="flex items-center justify-between w-full mb-1">
                       <span className="text-[8px] uppercase font-black tracking-widest opacity-80">
@@ -2432,9 +2477,16 @@ export default function MarketDetail() {
                       </div>
                     </div>
                     <div className="text-xl font-black uppercase tracking-tight flex items-center gap-2 my-0.5">
-                      {isNoTrade 
-                        ? "⚖️ NO TRADE / MONITORING" 
-                        : (isBuy ? "🚀 CALL / UP (GREEN)" : "🔻 PUT / DOWN (RED)")}
+                      {currentTfDir === "BUY" ? (
+                        <span className="text-emerald-400 flex items-center gap-1.5">🚀 CALL / UP (GREEN)</span>
+                      ) : (
+                        <span className="text-rose-400 flex items-center gap-1.5">🔻 PUT / DOWN (RED)</span>
+                      )}
+                      {isNoTrade && (
+                        <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-mono font-normal">
+                          ⚖️ LEAN {currentTfDir}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-mono font-black text-white/90">
@@ -2442,13 +2494,11 @@ export default function MarketDetail() {
                       </span>
                       <span className={cn(
                         "text-[9px] font-bold px-1.5 py-0.2 rounded", 
-                        isNoTrade 
-                          ? "text-amber-400 bg-amber-500/20" 
-                          : (isBuy ? "text-emerald-400 bg-emerald-500/20" : "text-rose-400 bg-rose-500/20")
+                        currentTfDir === "BUY" ? "text-emerald-400 bg-emerald-500/20" : "text-rose-400 bg-rose-500/20"
                       )}>
                         {isNoTrade 
-                          ? `Low Conviction / Consolidation (${timeframe.toUpperCase()})` 
-                          : (isBuy ? `High Buy Confluence (${timeframe.toUpperCase()} CALL)` : `High Sell Confluence (${timeframe.toUpperCase()} PUT)`)}
+                          ? `Consolidation Leaning ${currentTfDir} (${timeframe.toUpperCase()})` 
+                          : (currentTfDir === "BUY" ? `High Buy Confluence (${timeframe.toUpperCase()} CALL)` : `High Sell Confluence (${timeframe.toUpperCase()} PUT)`)}
                       </span>
                     </div>
                   </div>
