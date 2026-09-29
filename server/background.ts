@@ -304,8 +304,8 @@ export function startBackgroundTasks() {
       for (const instrument of activeInstruments) {
         let priceData = null;
 
-        if (instrument.assetClass === "FOREX" || ["XAGUSD", "XAUUSD"].includes(instrument.symbol)) {
-          const isMetal = ["XAGUSD", "XAUUSD"].includes(instrument.symbol);
+        if (instrument.assetClass === "FOREX" || ["XAGUSD"].includes(instrument.symbol)) {
+          const isMetal = ["XAGUSD"].includes(instrument.symbol);
           const shouldFetch = isMetal ? (bgTick % 3 === 0) : ((bgTick % 3 === 0) && (((bgTick / 3) % 36) === (callCount % 36)));
           callCount++;
           

@@ -992,8 +992,8 @@ export async function registerRoutes(
       } catch (err) { }
     }
 
-    // TwelveData Live Spot Price for Metals (XAUUSD, XAGUSD) to match TradingView Spot CFD exactly
-    if (symbol === "XAUUSD" || symbol === "XAGUSD") {
+    // TwelveData Live Spot Price for Metals (XAGUSD) to match TradingView Spot CFD exactly
+    if (symbol === "XAGUSD") {
       const now = Date.now();
       const cached = metalPriceCache.get(symbol);
       if (cached && (now - cached.time) < 10000) {
@@ -1009,7 +1009,7 @@ export async function registerRoutes(
 
       try {
         const TWELVEDATA_API_KEY = process.env.TWELVEDATA_API_KEY || "4a3bb708bb7247528d0efe958476bdaa";
-        const tdSym = symbol === "XAUUSD" ? "XAU/USD" : "XAG/USD";
+        const tdSym = "XAG/USD";
         const tdRes = await fetch(`https://api.twelvedata.com/price?symbol=${tdSym}&apikey=${TWELVEDATA_API_KEY}`);
         if (tdRes.ok) {
           const tdData = await tdRes.json() as any;
