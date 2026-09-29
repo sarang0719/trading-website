@@ -596,9 +596,9 @@ function LiveTradingChartComponent({
           const now = performance.now();
           if (now - lastRenderTsRef.current >= RENDER_MS) {
             lastRenderTsRef.current = now;
-            // For WebSocket streaming assets (isCrypto), WebSocket onmessage is the sole authority for candle updates.
-            // Only run local candle bucket updates for non-WS REST polled assets to avoid dual-timestamp candle race conditions.
-            if (!isCrypto) {
+            // If external WebSocket is not actively open and streaming, fluidly update the live candle from the interpolated price
+            const isWsOpen = ws && ws.readyState === WebSocket.OPEN;
+            if (!isWsOpen) {
               updateCandleRef.current(next);
             }
           }
@@ -615,7 +615,7 @@ function LiveTradingChartComponent({
       // Fail-safe REST poller for ALL assets (guarantees chart never goes blank if client WS is blocked)
       const poll = async () => {
         if (!isActive) return;
-        // Skip REST polling if live WebSocket feed is actively connected to prevent feed feedback conflict
+        // Skip REST polling if live WebSocket feed is actively connected
         if (ws && ws.readyState === WebSocket.OPEN) return;
 
         try {
@@ -632,10 +632,45 @@ function LiveTradingChartComponent({
       poll();
       if (!poller) poller = setInterval(poll, 1000);
 
-      if (isCrypto) {
+      // ── Connect to Local Server WebSocket (Same-Origin, Zero ISP Blocks) ──
+      try {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const localWsUrl = `${protocol}//${window.location.host}/ws`;
+        const localWs = new WebSocket(localWsUrl);
+        localWs.onopen = () => {
+          localWs.send(JSON.stringify({ type: "subscribe", symbols: [symbol] }));
+        };
+        localWs.onmessage = (ev) => {
+          if (!isActive) return;
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === "market_data" && msg.symbol === symbol && msg.data?.price) {
+              const p = parseFloat(msg.data.price);
+              if (p > 0) {
+                onTickRef.current(p);
+                setIsConnected(true);
+              }
+            }
+          } catch {}
+        };
+        localWs.onerror = () => {};
+        localWs.onclose = () => {};
+      } catch {}
+
+      // ── Connect to Binance WebSocket for Cryptos & Gold (if available & not blocked) ──
+      const isBinanceBlocked = typeof sessionStorage !== "undefined" && sessionStorage.getItem("binance_ws_blocked") === "1";
+
+      if (isCrypto && !isBinanceBlocked && typeof navigator !== "undefined" && navigator.onLine) {
         let wsSymbol = symbol.toLowerCase();
-        if (symbol === "BTCUSD") wsSymbol = "btcusdt";
-        else if (symbol === "XAUUSD" || symbol === "XAUTUSDT" || symbol === "PAXGUSDT") wsSymbol = "xautusdt";
+        if (symbol === "BTCUSD" || symbol === "BTCUSDT") wsSymbol = "btcusdt";
+        else if (symbol === "ETHUSD" || symbol === "ETHUSDT") wsSymbol = "ethusdt";
+        else if (symbol === "SOLUSD" || symbol === "SOLUSDT") wsSymbol = "solusdt";
+        else if (symbol === "BNBUSD" || symbol === "BNBUSDT") wsSymbol = "bnbusdt";
+        else if (symbol === "XRPUSD" || symbol === "XRPUSDT") wsSymbol = "xrpusdt";
+        // On Binance WebSocket, Gold spot is mapped to PAXGUSDT stream (xautusdt does not have a kline stream)
+        else if (symbol === "XAUUSD" || symbol === "XAUTUSDC" || symbol === "XAUTUSDT" || symbol === "PAXGUSDT") wsSymbol = "paxgusdt";
+        else if (!wsSymbol.endsWith("usdt") && !wsSymbol.endsWith("usdc")) wsSymbol = `${wsSymbol}usdt`;
+
         const interval = TF_BIN[timeframe] ?? "1m";
 
         try {
@@ -676,14 +711,20 @@ function LiveTradingChartComponent({
           };
           ws.onclose = () => {
             if (!isActive) return;
+            if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("binance_ws_blocked") === "1") return;
             wsReco = setTimeout(() => { wsDelay = Math.min(wsDelay * 2, 30000); connectWS(); }, wsDelay);
           };
           ws.onerror = () => {
-            if (ws) ws.onclose = null;
-            if (!isActive) return;
+            // If connection fails, disable Binance WS for session to avoid spamming console
+            if (typeof sessionStorage !== "undefined") sessionStorage.setItem("binance_ws_blocked", "1");
+            if (ws) {
+              ws.onclose = null;
+              try { ws.close(); } catch {}
+              ws = null;
+            }
           };
-        } catch (wsErr) {
-          console.warn("[Chart WS] Client WS disabled, using REST stream fallback:", wsErr);
+        } catch {
+          if (typeof sessionStorage !== "undefined") sessionStorage.setItem("binance_ws_blocked", "1");
         }
       }
     };

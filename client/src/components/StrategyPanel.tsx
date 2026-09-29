@@ -329,13 +329,25 @@ export default function StrategyPanel({ symbol, interval = "1d", cfg: cfgProp, c
       wsRef.current = null;
       if (destroyRef.current) return;
       if (typeof navigator === "undefined" || !navigator.onLine) return;
-      if (isCrypto) {
+      if (isCrypto && !(typeof sessionStorage !== "undefined" && sessionStorage.getItem("binance_ws_blocked") === "1")) {
         try {
+          let wsSym = symUpper.toLowerCase();
+          if (symUpper === "BTCUSD" || symUpper === "BTCUSDT") wsSym = "btcusdt";
+          else if (symUpper === "ETHUSD" || symUpper === "ETHUSDT") wsSym = "ethusdt";
+          else if (symUpper === "SOLUSD" || symUpper === "SOLUSDT") wsSym = "solusdt";
+          else if (symUpper === "BNBUSD" || symUpper === "BNBUSDT") wsSym = "bnbusdt";
+          else if (symUpper === "XRPUSD" || symUpper === "XRPUSDT") wsSym = "xrpusdt";
+          else if (symUpper === "XAUUSD" || symUpper === "XAUTUSDC" || symUpper === "XAUTUSDT" || symUpper === "PAXGUSDT") wsSym = "paxgusdt";
+          else if (!wsSym.endsWith("usdt") && !wsSym.endsWith("usdc")) wsSym = `${wsSym}usdt`;
+
           const ws = new WebSocket(
-            `wss://stream.binance.com:9443/ws/${symUpper.toLowerCase()}@kline_${ivl}`
+            `wss://stream.binance.com:9443/ws/${wsSym}@kline_${ivl}`
           );
           wsRef.current = ws;
-          ws.onerror = () => { wsRef.current = null; };
+          ws.onerror = () => {
+            if (typeof sessionStorage !== "undefined") sessionStorage.setItem("binance_ws_blocked", "1");
+            wsRef.current = null;
+          };
           ws.onclose = () => { ws.onerror = null; };
 
           ws.onmessage = (ev: MessageEvent) => {

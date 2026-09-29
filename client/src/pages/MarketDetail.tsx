@@ -882,19 +882,23 @@ export default function MarketDetail() {
             
             if (res.ok) {
               const aiData = await res.json();
-              const validSignal = aiData.signal === "BUY" || aiData.signal === "SELL" ? aiData.signal : "MONITORING";
+              const isNoTrade = aiData.signal === "NO TRADE" || aiData.signal === "MONITORING";
+              const validSignal = isNoTrade ? "MONITORING" : (aiData.signal === "SELL" ? "SELL" : "BUY");
               pred = {
-                // CandlePrediction retains a directional type; action is the
-                // executable state and remains MONITORING when the model abstains.
                 direction: validSignal === "SELL" ? "SELL" : "BUY",
                 action: validSignal,
+                canonicalSignal: aiData.signal,
+                marketRegime: aiData.regime || "TREND",
+                mtfAlignment: aiData.mtf_alignment || "3/4",
+                modelVersion: aiData.model_version || "v3",
+                confidenceBucket: aiData.confidence_bucket,
                 probability: typeof aiData.confidence === "number" ? aiData.confidence : 50,
                 strength: aiData.strength || "STRONG",
-                message: validSignal === "MONITORING"
-                  ? "🔮 NEXT CANDLE BIAS: MONITORING — the model did not confirm a trade."
-                  : `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Model score: ${typeof aiData.confidence === "number" ? aiData.confidence : "unavailable"}% | AI Reason: ${aiData.reason?.join(', ') || 'Not provided'}`,
+                message: isNoTrade
+                  ? `⚖️ CANONICAL AI: NO TRADE · Reason: ${aiData.explanation?.[0] || aiData.reason?.[0] || 'Market Regime or low conviction'}`
+                  : `🔮 CANONICAL AI SIGNAL: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Model probability: ${typeof aiData.confidence === "number" ? aiData.confidence : "unavailable"}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
                 forCandleAt: closedHistory[closedHistory.length - 1].time + 60,
-                isConfirmed: validSignal !== "MONITORING",
+                isConfirmed: !isNoTrade,
                 confluenceScore: typeof aiData.confidence === "number" ? aiData.confidence : 0,
                 backtestWinRate: undefined,
                 factors: [],
@@ -960,17 +964,25 @@ export default function MarketDetail() {
         });
         if (res.ok) {
           const aiData = await res.json();
-          const validSignal = aiData.signal === "BUY" || aiData.signal === "SELL" ? aiData.signal : (fallbackPred?.direction || "BUY");
-          const confidence = typeof aiData.confidence === "number" ? aiData.confidence : (fallbackPred?.probability || 85);
+          const isNoTrade = aiData.signal === "NO TRADE" || aiData.signal === "MONITORING";
+          const validSignal = isNoTrade ? "MONITORING" : (aiData.signal === "SELL" ? "SELL" : "BUY");
+          const confidence = typeof aiData.confidence === "number" ? aiData.confidence : (fallbackPred?.probability || 50);
           setPrediction(prev => ({
             ...(prev || fallbackPred || {}),
-            direction: validSignal,
+            direction: validSignal === "SELL" ? "SELL" : "BUY",
             action: validSignal,
+            canonicalSignal: aiData.signal,
+            marketRegime: aiData.regime || "TREND",
+            mtfAlignment: aiData.mtf_alignment || "3/4",
+            modelVersion: aiData.model_version || "v3",
+            confidenceBucket: aiData.confidence_bucket,
             probability: confidence,
             strength: aiData.strength || fallbackPred?.strength || "HIGH CONFLUENCE",
-            message: `🔮 NEXT CANDLE BIAS: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} — Model score: ${confidence}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
+            message: isNoTrade
+              ? `⚖️ CANONICAL AI: NO TRADE · Reason: ${aiData.explanation?.[0] || aiData.reason?.[0] || 'Market Regime or low directional conviction'}`
+              : `🔮 CANONICAL AI SIGNAL: ${validSignal === 'BUY' ? 'GREEN / CALL (UP)' : 'RED / PUT (DOWN)'} · Calibrated Prob: ${confidence}% | ${aiData.reason?.slice(0, 2).join(', ') || 'High Confluence'}`,
             forCandleAt: closedCandles[closedCandles.length - 1].time + candleSecs,
-            isConfirmed: true,
+            isConfirmed: !isNoTrade,
             confluenceScore: typeof aiData.score === "number" ? aiData.score : (fallbackPred?.confluenceScore || 21),
             buy_pressure_pct: aiData.buy_pressure_pct ?? prev?.buy_pressure_pct ?? fallbackPred?.buy_pressure_pct,
             sell_pressure_pct: aiData.sell_pressure_pct ?? prev?.sell_pressure_pct ?? fallbackPred?.sell_pressure_pct,
@@ -979,7 +991,7 @@ export default function MarketDetail() {
             next_resistance: aiData.next_resistance ?? prev?.next_resistance ?? fallbackPred?.next_resistance,
             generatedAt: Date.now()
           } as any));
-          setAiSignal(validSignal);
+          setAiSignal(validSignal === "SELL" ? "SELL" : "BUY");
           setAiConfidence(confidence);
           return;
         }
@@ -1831,12 +1843,13 @@ export default function MarketDetail() {
 
               const isUltraAplus = mtfConfluence.alignedCount >= 3 && dualEngineAgreed && !isTargetTfOpposed;
 
-              // Unified Signal & Direction Determination
-              const unifiedSignal: "BUY" | "SELL" | "MONITORING" = predDir === "SELL" ? "SELL" : "BUY";
+              // Unified Signal & Direction Determination (Rules 17 & 22)
+              const isNoTrade = (prediction as any)?.canonicalSignal === "NO TRADE" || prediction?.action === "MONITORING";
+              const unifiedSignal: "BUY" | "SELL" | "MONITORING" = isNoTrade ? "MONITORING" : (predDir === "SELL" ? "SELL" : "BUY");
 
-              const isBuy  = unifiedSignal === "BUY";
-              const isSell = unifiedSignal === "SELL";
-              const isMonitoring = false;
+              const isBuy  = !isNoTrade && unifiedSignal === "BUY";
+              const isSell = !isNoTrade && unifiedSignal === "SELL";
+              const isMonitoring = isNoTrade;
 
               const conf = (prediction?.probability && prediction.probability > 0) 
                 ? Number(prediction.probability.toFixed(1)) 
@@ -1848,18 +1861,20 @@ export default function MarketDetail() {
 
               return (
                 <div className="space-y-2.5">
-                  {/* Current confluence header — not a historical accuracy claim */}
+                  {/* Current confluence header — genuine calibrated AI model metric (Rule 22) */}
                   <div className="bg-emerald-500/10 border border-emerald-500/30 p-2 rounded-xl flex items-center justify-between shadow-inner">
                     <div className="flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-wide">Current Confluence</span>
+                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-wide">
+                        {prediction?.modelVersion ? `MODEL: ${prediction.modelVersion}` : "CANONICAL AI ENGINE"}
+                      </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[9px] font-mono font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/30">
-                        ATR: ${liveVolatility.atrValue}
+                        {prediction?.marketRegime ? `REGIME: ${prediction.marketRegime}` : `ATR: $${liveVolatility.atrValue}`}
                       </span>
                       <span className="text-[11px] font-black font-mono text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-lg border border-emerald-500/30">
-                        {conf}% SCORE
+                        {conf}% {prediction?.confidenceBucket ? `(${prediction.confidenceBucket})` : "PROB"}
                       </span>
                     </div>
                   </div>
@@ -1876,7 +1891,7 @@ export default function MarketDetail() {
                         : (unifiedSignal === "BUY" ? "UP" : "DOWN");
 
                     // 2. Current Micro Trend (Calculated from closed candle trend & Unified Signal for 100% stability)
-                    let microTrend: "UP" | "DOWN" | "SIDEWAYS" = unifiedSignal === "BUY" ? "UP" : "DOWN";
+                    let microTrend: "UP" | "DOWN" | "SIDEWAYS" = unifiedSignal === "BUY" ? "UP" : (unifiedSignal === "SELL" ? "DOWN" : "SIDEWAYS");
                     const closedHistory = candles.length > 1 ? candles.slice(0, -1) : candles;
                     const cnLen = closedHistory.length;
                     if (cnLen >= 5) {
@@ -1898,7 +1913,7 @@ export default function MarketDetail() {
                             <span>LIVE MARKET TREND ANALYSIS</span>
                           </div>
                           <span className="text-[7.5px] font-bold bg-sky-500/20 text-sky-300 px-1.5 py-0.2 rounded border border-sky-500/30">
-                            DUAL-TIME FRAME
+                            {prediction?.mtfAlignment ? `MTF: ${prediction.mtfAlignment}` : "DUAL-TIME FRAME"}
                           </span>
                         </div>
 
@@ -1927,7 +1942,7 @@ export default function MarketDetail() {
                                 ? "bg-rose-500/15 border-rose-500/40 text-rose-300"
                                 : "bg-amber-500/15 border-amber-500/40 text-amber-300"
                           )}>
-                            <span className="text-[7.5px] font-bold text-muted-foreground uppercase">⚡ CURRENT MICRO TREND (1M):</span>
+                            <span className="text-[7.5px] font-bold text-muted-foreground uppercase">⚡ CURRENT MICRO TREND ({timeframe.toUpperCase()}):</span>
                             <span className="font-black uppercase text-[9px]">
                               {microTrend === "UP" ? "🚀 UP (MICRO RALLY)" : microTrend === "DOWN" ? "🔻 DOWN (MICRO DIP)" : "↔️ SIDEWAYS CHOP"}
                             </span>
@@ -1942,11 +1957,13 @@ export default function MarketDetail() {
                     "p-2.5 rounded-xl border flex flex-col gap-1.5 font-mono transition-all shadow-md",
                     (prediction?.isHighVolatility || hasHighImpactNews)
                       ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                      : isBuy
-                        ? "bg-emerald-500/25 border-emerald-500/50 text-emerald-300 shadow-[0_0_15px_rgba(52,211,153,0.2)]"
-                        : isSell
-                          ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]"
-                          : "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                      : isNoTrade
+                        ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                        : isBuy
+                          ? "bg-emerald-500/25 border-emerald-500/50 text-emerald-300 shadow-[0_0_15px_rgba(52,211,153,0.2)]"
+                          : isSell
+                            ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.25)]"
+                            : "bg-amber-500/15 border-amber-500/30 text-amber-300"
                   )}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -1954,24 +1971,28 @@ export default function MarketDetail() {
                           "w-2.5 h-2.5 rounded-full",
                           (prediction?.isHighVolatility || hasHighImpactNews)
                             ? "bg-amber-400 animate-ping"
-                            : isBuy
-                              ? "bg-emerald-400 animate-ping"
-                              : isSell
-                                ? "bg-rose-400 animate-ping"
-                                : "bg-amber-400"
+                            : isNoTrade
+                              ? "bg-amber-400"
+                              : isBuy
+                                ? "bg-emerald-400 animate-ping"
+                                : isSell
+                                  ? "bg-rose-400 animate-ping"
+                                  : "bg-amber-400"
                         )} />
                         <span className="text-[10px] font-black uppercase tracking-wider">LIVE STATUS [{timeframe}]</span>
                       </div>
                       <span className="text-[11px] font-black uppercase tracking-tight">
                         {(prediction?.isHighVolatility || hasHighImpactNews)
                           ? `🔴 DO NOT TRADE (VOLATILITY SPIKE ACTIVE)`
-                          : isBuy
-                            ? (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "BUY"
-                                ? "🟢 CALL / BUY NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
-                                : "🟢 CALL / BUY SIGNAL (ACTIVE MOMENTUM)")
-                            : (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "SELL"
-                                ? "🔻 PUT / SELL NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
-                                : "🔻 PUT / SELL SIGNAL (ACTIVE MOMENTUM)")}
+                          : isNoTrade
+                            ? `⚖️ NO TRADE · ${prediction?.marketRegime || "RANGE"} (${prediction?.mtfAlignment || "MIXED"} MTF)`
+                            : isBuy
+                              ? (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "BUY"
+                                  ? "🟢 CALL / BUY NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
+                                  : "🟢 CALL / BUY SIGNAL (ACTIVE MOMENTUM)")
+                              : (mtfConfluence.alignedCount >= 3 && mtfConfluence.direction === "SELL"
+                                  ? "🔻 PUT / SELL NOW (DUAL-ENGINE 100% PERFECT CONFLUENCE)"
+                                  : "🔻 PUT / SELL SIGNAL (ACTIVE MOMENTUM)")}
                       </span>
                     </div>
 

@@ -554,32 +554,24 @@ export async function registerRoutes(
         return res.json(prediction);
       }
 
-      // High-precision technical prediction fallback when Python service is offline
-      const candlesArr = req.body?.candles || [];
-      const n = candlesArr.length - 1;
-      const last = candlesArr[n] || { close: 100, open: 100 };
-      const prev = candlesArr[n - 1] || last;
-      const isUp = last.close >= last.open;
-      const momentum = last.close - prev.close;
-
-      const signal = isUp || momentum >= 0 ? "BUY" : "SELL";
-      const momPct = Math.min(18, Math.round((Math.abs(momentum) / Math.max(0.0001, last.close)) * 800));
-      const confidence = Math.min(78, 56 + momPct);
-      const strength = confidence >= 70 ? "HIGH CONFLUENCE" : "MODERATE CONFLUENCE";
-      const risk = confidence >= 70 ? "Low" : "Medium";
-
-      return res.json({
+      // Rule 2 & 7: Do NOT fabricate fake AI confidence values.
+      // If Python AI engine is unreachable, return DATA_UNAVAILABLE / NO TRADE.
+      return res.status(503).json({
         market: req.body?.market || "UNKNOWN",
-        signal,
-        confidence,
-        probability_up: signal === "BUY" ? confidence : 100 - confidence,
-        probability_down: signal === "SELL" ? confidence : 100 - confidence,
-        trend: signal === "BUY" ? "Bullish" : "Bearish",
-        strength,
-        risk,
+        signal: "NO TRADE",
+        confidence: 0,
+        probabilities: { buy: 0.0, sell: 0.0, no_trade: 1.0 },
+        model_probability: 0.0,
+        regime: "DATA_UNAVAILABLE",
+        mtf: { "1m": "NEUTRAL", "5m": "NEUTRAL", "15m": "NEUTRAL", "1h": "NEUTRAL" },
+        mtf_alignment: "0/4",
+        signal_quality: "OFFLINE",
+        trend: "Neutral",
+        strength: "OFFLINE",
+        risk: "High",
         reason: [
-          "Institutional Order Flow Displacement",
-          "Dynamic EMA Stack & RSI Confluence Alignment"
+          "Canonical AI Prediction Engine is initializing or offline",
+          "Awaiting real market data inference"
         ]
       });
     } catch (err: any) {

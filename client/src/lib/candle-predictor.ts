@@ -56,6 +56,12 @@ export interface CandlePrediction {
   position_hold_zone?: string;
   next_support?: number;
   next_resistance?: number;
+  canonicalSignal?: "BUY" | "SELL" | "NO TRADE";
+  marketRegime?: string;
+  mtfAlignment?: string;
+  modelVersion?: string;
+  modelProbability?: number;
+  confidenceBucket?: string;
 }
 
 export interface PredictionFactor {

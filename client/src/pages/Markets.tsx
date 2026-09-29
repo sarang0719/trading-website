@@ -118,6 +118,8 @@ export default function Markets() {
     // ── Binance !miniTicker (all symbols at once) ──────────────────────────
     const connectBinance = () => {
       if (!isActive || binanceInsts.length === 0) return;
+      if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("binance_ws_blocked") === "1") return;
+
       try {
         wsBinance = new WebSocket("wss://stream.binance.com:9443/ws/!miniTicker@arr");
 
@@ -150,6 +152,7 @@ export default function Markets() {
 
         wsBinance.onclose = () => {
           if (!isActive) return;
+          if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("binance_ws_blocked") === "1") return;
           binanceRecoTimer = setTimeout(() => {
             binanceDelay = Math.min(binanceDelay * 2, 30000);
             connectBinance();
@@ -157,11 +160,16 @@ export default function Markets() {
         };
 
         wsBinance.onerror = () => {
-          if (wsBinance) wsBinance.onclose = null;
-          if (!isActive) return;
-          binanceRecoTimer = setTimeout(() => { binanceDelay = Math.min(binanceDelay * 2, 30000); connectBinance(); }, binanceDelay);
+          if (typeof sessionStorage !== "undefined") sessionStorage.setItem("binance_ws_blocked", "1");
+          if (wsBinance) {
+            wsBinance.onclose = null;
+            try { wsBinance.close(); } catch {}
+            wsBinance = null;
+          }
         };
-      } catch {}
+      } catch {
+        if (typeof sessionStorage !== "undefined") sessionStorage.setItem("binance_ws_blocked", "1");
+      }
     };
 
     // ── TwelveData (Forex / Metals / Stocks) ──────────────────────────────

@@ -34,38 +34,57 @@ export function startAiBotEngine() {
         if (!priceData || !priceData.price) continue;
         
         const price = Number(priceData.price);
-        const sparkline = priceData.sparkline as string[] || [];
-        if (sparkline.length < 3) continue;
-
-        // 3. ── High-Precision Multi-Timeframe & Technical Confluence Engine ──
-        const prices = sparkline.map(Number);
+        const sparkline = (priceData.sparkline as string[]) || [];
+        // 3. ── Canonical AI Engine Integration (Rule 32) ──
+        // Node AI Bot consumes the canonical Python Prediction API rather than generating conflicting signals
+        const prices: number[] = sparkline.map(Number);
         if (prices.length < 5) continue;
-        
-        const lastPx = prices[prices.length - 1];
-        const prevPx = prices[prices.length - 2];
-        const prev2Px = prices[prices.length - 3] || prevPx;
-        const firstPx = prices[0];
-        
-        // Multi-period exponential averages & slope velocity
-        const emaFast = prices.slice(-3).reduce((a, b) => a + b, 0) / 3;
-        const emaSlow = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const velocity = ((lastPx - firstPx) / Math.max(0.0001, firstPx)) * 1000;
-        
-        // Consecutive directional trend expansion
-        const isUpwardExpansion = lastPx > prevPx && prevPx >= prev2Px && lastPx > emaSlow && emaFast > emaSlow;
-        const isDownwardExpansion = lastPx < prevPx && prevPx <= prev2Px && lastPx < emaSlow && emaFast < emaSlow;
-        
+
+        const pyPort = process.env.PYTHON_PORT || "8008";
+        const pyUrl = process.env.PYTHON_AI_URL || `http://127.0.0.1:${pyPort}`;
+
+        const candles = prices.map((p: number, idx: number) => ({
+          open: idx > 0 ? prices[idx - 1] : p,
+          high: Math.max(p, idx > 0 ? prices[idx - 1] : p),
+          low: Math.min(p, idx > 0 ? prices[idx - 1] : p),
+          close: p,
+          volume: 1000,
+          time: Math.floor(Date.now() / 1000) - (prices.length - idx) * 60
+        }));
+
         let signal: "BUY" | "SELL" | null = null;
         let reason = "";
-        
-        if (isUpwardExpansion && velocity > 0.015) {
-           signal = "BUY";
-           reason = "Bullish SMC Momentum Expansion + EMA 3/8/21 Alignment";
-        } else if (isDownwardExpansion && velocity < -0.015) {
-           signal = "SELL";
-           reason = "Bearish SMC Momentum Expansion + EMA 3/8/21 Alignment";
-        } else {
-           continue; // Skip weak / low-confluence setups
+
+        try {
+          const resp = await fetch(`${pyUrl}/api/predict`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              market: sym,
+              timeframe: "5m",
+              candles
+            }),
+            signal: AbortSignal.timeout(3000)
+          });
+
+          if (resp.ok) {
+            const aiData: any = await resp.json();
+            if (aiData.signal === "BUY" && (aiData.signal_quality === "HIGH" || aiData.signal_quality === "MODERATE" || aiData.signal_quality === "MEDIUM")) {
+              signal = "BUY";
+              reason = `Canonical AI Model (${aiData.model_version || "v3"}) · ${aiData.regime || "TREND"} (${aiData.mtf_alignment || "MTF"} MTF)`;
+            } else if (aiData.signal === "SELL" && (aiData.signal_quality === "HIGH" || aiData.signal_quality === "MODERATE" || aiData.signal_quality === "MEDIUM")) {
+              signal = "SELL";
+              reason = `Canonical AI Model (${aiData.model_version || "v3"}) · ${aiData.regime || "TREND"} (${aiData.mtf_alignment || "MTF"} MTF)`;
+            } else {
+              // Rule 17: Canonical engine returned NO TRADE or low edge — abstain from trading!
+              continue;
+            }
+          } else {
+            continue;
+          }
+        } catch {
+          // Rule 7: If Python AI engine is offline or timing out, safely abstain without fabricating trades
+          continue;
         }
 
         if (!signal) continue;
