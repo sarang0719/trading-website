@@ -62,6 +62,7 @@ export interface CandlePrediction {
   modelVersion?: string;
   modelProbability?: number;
   confidenceBucket?: string;
+  timeframe?: string;
 }
 
 export interface PredictionFactor {
