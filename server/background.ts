@@ -83,12 +83,12 @@ export function startBackgroundTasks() {
 
   async function fetchRealSparkline(instrument: any, currentPrice: number, changeAbs: number): Promise<string[]> {
     try {
-      if (instrument.assetClass === "CRYPTO" || instrument.symbol === "PAXGUSDT" || instrument.symbol === "BTCUSD" || instrument.symbol === "XAUTUSDC" || instrument.symbol === "XAUTUSDT") {
+      if (instrument.assetClass === "CRYPTO" || instrument.symbol === "PAXGUSDT" || instrument.symbol === "XAUUSD" || instrument.symbol === "BTCUSD" || instrument.symbol === "XAUTUSDC" || instrument.symbol === "XAUTUSDT") {
         const BINANCE_API_KEY = process.env.BINANCE_API_KEY || "4ZxKHsnocjAIQAVfcdfy1yh5Yf5AlfryUWa7cYmAlwbsSmAHwgNHnjIJHhBJGATW";
         const headers: Record<string, string> = { "X-MBX-APIKEY": BINANCE_API_KEY };
         let binSym = instrument.symbol;
         if (instrument.symbol === "BTCUSD") binSym = "BTCUSDC";
-        else if (instrument.symbol === "XAUTUSDC" || instrument.symbol === "XAUTUSDT") binSym = "PAXGUSDT";
+        else if (instrument.symbol === "XAUUSD" || instrument.symbol === "XAUTUSDC" || instrument.symbol === "XAUTUSDT") binSym = "PAXGUSDT";
         const res = await fetch(`https://api3.binance.com/api/v3/klines?symbol=${binSym}&interval=15m&limit=60`, { headers });
         if (res.ok) {
           const data = await res.json() as any[];
