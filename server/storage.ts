@@ -781,7 +781,7 @@ export class DatabaseStorage implements IStorage {
         // Institutional Base-price Mapping v4.0
         if (sym === "BTCUSD" || sym === "BTCUSDT") base = 69717.92;
         else if (sym === "ETHUSDT") base = 3755.20;
-        else if (sym === "XAUUSD") base = 2424.85;
+        else if (sym === "XAUUSD") base = 4150.00;
         else if (sym === "XAUTUSDC" || sym === "XAUTUSDT") base = 3998.00;
         else if (sym === "USDINR") base = 83.50;
         else if (sym === "USDPKR") base = 278.40;

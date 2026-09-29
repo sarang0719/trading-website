@@ -210,8 +210,12 @@ export interface SignalHistoryItem {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function MarketDetail() {
-  const [, params] = useRoute("/app/markets/:id");
-  const id = params?.id ? Number(params.id) : undefined;
+  const [, appParams] = useRoute("/app/markets/:id");
+  const [, directParams] = useRoute("/markets/:id");
+  const [, singleParams] = useRoute("/market/:id");
+  const [, tradeParams] = useRoute("/trade/:id");
+  const rawId = appParams?.id || directParams?.id || singleParams?.id || tradeParams?.id || (typeof window !== "undefined" ? window.location.pathname.match(/\/(\d+)(?:[/?#]|$)/)?.[1] : undefined);
+  const id = rawId ? Number(rawId) : undefined;
   const { toast } = useToast();
   const { user } = useAuth();
 

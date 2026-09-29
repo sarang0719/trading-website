@@ -1408,12 +1408,17 @@ export async function registerRoutes(
 
         if (basePrice === 0) {
           if (inst && (inst as any).price && parseFloat(String((inst as any).price)) > 0) {
-            basePrice = parseFloat(String((inst as any).price));
+            const parsedInstP = parseFloat(String((inst as any).price));
+            if (symbol === "XAUUSD" && parsedInstP < 3500) {
+              basePrice = 4150.00;
+            } else {
+              basePrice = parsedInstP;
+            }
           }
           else if (symbol === "EURUSD") basePrice = 1.0850;
           else if (symbol === "GBPUSD") basePrice = 1.2850;
           else if (symbol === "USDJPY") basePrice = 157.50;
-          else if (symbol === "XAUUSD") basePrice = 4028.50;
+          else if (symbol === "XAUUSD") basePrice = 4150.00;
           else if (symbol === "AAPL") basePrice = 340.00;
           else if (symbol === "TSLA") basePrice = 307.00;
           else if (symbol === "NVDA") basePrice = 197.00;
@@ -1422,12 +1427,13 @@ export async function registerRoutes(
         }
 
         const nowSec = Math.floor(Date.now() / 1000);
-        const intSecs = interval.endsWith('m') ? parseInt(interval) * 60 : interval.endsWith('H') ? parseInt(interval) * 3600 : 86400;
+        const intSecs = interval.endsWith('m') ? parseInt(interval) * 60 : (interval.endsWith('H') || interval.endsWith('h')) ? parseInt(interval) * 3600 : 86400;
+        const bucketedNow = Math.floor(nowSec / intSecs) * intSecs;
         const rawCandles: any[] = [];
         let currClose = basePrice;
 
         for (let i = 0; i < 120; i++) {
-          const t = nowSec - (i * intSecs);
+          const t = bucketedNow - (i * intSecs);
           const change = (Math.sin(i * 0.3) + (Math.cos(i * 0.7) * 0.5)) * 0.0012 * currClose;
           const c = currClose;
           const o = currClose - change;

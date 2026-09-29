@@ -74,7 +74,7 @@ export function startBackgroundTasks() {
     const allInstruments = await db.select().from(instruments);
     const map = new Map<string, any>();
     allInstruments.forEach((i: any) => {
-      if (i.assetClass === "CRYPTO" || i.symbol === "PAXGUSDT" || i.symbol === "BTCUSD") {
+      if (i.assetClass === "CRYPTO" || i.symbol === "PAXGUSDT" || i.symbol === "BTCUSD" || i.symbol === "XAUUSD" || i.symbol === "XAUTUSDC" || i.symbol === "XAUTUSDT") {
         map.set(i.symbol, i);
       }
     });
@@ -304,7 +304,21 @@ export function startBackgroundTasks() {
       for (const instrument of activeInstruments) {
         let priceData = null;
 
-        if (instrument.assetClass === "FOREX" || ["XAGUSD"].includes(instrument.symbol)) {
+        if (instrument.symbol === "XAUUSD" || instrument.symbol === "PAXGUSDT") {
+          try {
+            const bRes = await fetch("https://api3.binance.com/api/v3/ticker/24hr?symbol=PAXGUSDT");
+            if (bRes.ok) {
+              const bData = await bRes.json();
+              if (bData && bData.lastPrice) {
+                priceData = {
+                  price: String(parseFloat(bData.lastPrice).toFixed(4)),
+                  changeAbs: String(parseFloat(bData.priceChange || "0").toFixed(4)),
+                  changePct: String(parseFloat(bData.priceChangePercent || "0").toFixed(2))
+                };
+              }
+            }
+          } catch {}
+        } else if (instrument.assetClass === "FOREX" || ["XAGUSD"].includes(instrument.symbol)) {
           const isMetal = ["XAGUSD"].includes(instrument.symbol);
           const shouldFetch = isMetal ? (bgTick % 3 === 0) : ((bgTick % 3 === 0) && (((bgTick / 3) % 36) === (callCount % 36)));
           callCount++;

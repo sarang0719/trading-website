@@ -315,16 +315,33 @@ function LiveTradingChartComponent({
   const updateCandleRef = useRef((price: number) => {
     if (!candleRef.current || price <= 0) return;
 
-    // Outlier filter: if tick price deviates > 8% from current candle open, ignore tick to prevent seed price wicks
+    // Outlier filter: if tick price deviates > 15% from current candle open, ignore tick to prevent seed price wicks
     if (liveCandle.current && liveCandle.current.open > 0) {
       const dev = Math.abs(price - liveCandle.current.open) / liveCandle.current.open;
-      if (dev > 0.08) return;
+      if (dev > 0.15) return;
     }
 
     const nowSec     = Math.floor(Date.now() / 1000);
     const candleSecs = candleSecsRef.current || 60;
     const bucket     = bucketTime(nowSec, candleSecs);
     let candle       = liveCandle.current;
+
+    // Guard against regressing time behind loaded historical candles
+    const hist = historyRef.current;
+    const lastHist = hist.length > 0 ? hist[hist.length - 1] : null;
+    if (lastHist && bucket < (lastHist.time as number)) {
+      if (candle && candle.time === lastHist.time) {
+        candle.close = price;
+        candle.high  = Math.max(candle.high, candle.open, price);
+        candle.low   = Math.min(candle.low,  candle.open, price);
+        if (candle.volume !== undefined) candle.volume += 1;
+        try {
+          candleRef.current?.update({ time: candle.time, open: candle.open, high: candle.high, low: candle.low, close: candle.close });
+          liveLineRef.current?.update({ time: candle.time, value: price });
+        } catch {}
+      }
+      return;
+    }
 
     if (!candle || bucket > candle.time) {
       const open = (candle && candle.close > 0 && bucket > candle.time) ? candle.close : price;
@@ -356,7 +373,26 @@ function LiveTradingChartComponent({
   const onTickRef = useRef((rawPrice: number) => {
     if (!rawPrice || rawPrice <= 0) return;
     const prev = prevPriceRef.current;
-    if (prev > 0 && Math.abs(rawPrice - prev) / prev > 0.08) return; // 8% spike guard
+    
+    // Check against history close if available to reject corrupted seed ticks
+    const hist = historyRef.current;
+    const lastHist = hist.length > 0 ? hist[hist.length - 1] : null;
+    if (lastHist && lastHist.close > 0) {
+      const devFromHist = Math.abs(rawPrice - lastHist.close) / lastHist.close;
+      if (devFromHist > 0.25) return; // Ignore ticks >25% divergent from actual candle history
+    }
+
+    if (prev > 0) {
+      const devFromPrev = Math.abs(rawPrice - prev) / prev;
+      if (devFromPrev > 0.15) {
+        // If tick is consistent with history, reset prev instead of dropping
+        if (lastHist && Math.abs(rawPrice - lastHist.close) / lastHist.close < 0.10) {
+          prevPriceRef.current = rawPrice;
+        } else {
+          return;
+        }
+      }
+    }
 
     targetPriceRef.current  = rawPrice;
     lastTickRef.current     = Date.now();
@@ -494,6 +530,7 @@ function LiveTradingChartComponent({
         if (!loadDone && isActive) {
           setIsLoading(false);
           startEngine();
+          connectWS();
         }
       }, 10000);
 
@@ -504,7 +541,7 @@ function LiveTradingChartComponent({
         );
         if (res.ok) {
           const data = await res.json();
-          if (data.results?.length > 3) {
+          if (data.results?.length > 0) {
             history = data.results;
           }
         }
@@ -514,10 +551,14 @@ function LiveTradingChartComponent({
       clearTimeout(loadTimeout);
 
       if (history.length > 0) {
-        // Sanitize & validate OHLC bounds for 100% precision
-        history = history.map((c, idx) => {
+        // Sanitize & validate OHLC bounds, strictly sort ascending, and deduplicate timestamps
+        const sanitizedMap = new Map<number, CandleOHLC>();
+        for (let idx = 0; idx < history.length; idx++) {
+          const c = history[idx];
+          const t = Number(c.time);
           let o = Number(c.open);
           let cl = Number(c.close);
+          if (isNaN(t) || isNaN(o) || isNaN(cl) || t <= 0 || cl <= 0) continue;
           let h = Math.max(o, cl, Number(c.high));
           let l = Math.min(o, cl, Number(c.low));
 
@@ -528,15 +569,30 @@ function LiveTradingChartComponent({
             l = Math.min(o, cl) - 0.25;
           }
 
-          return { ...c, open: o, high: h, low: l, close: cl };
-        });
+          sanitizedMap.set(t, {
+            time: t as UTCTimestamp,
+            open: o,
+            high: h,
+            low: l,
+            close: cl,
+            volume: Number(c.volume || 0)
+          });
+        }
+
+        history = Array.from(sanitizedMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
       }
 
       if (!isActive) return;
       historyRef.current = history;
 
-      if (isActive && chartRef.current && candleRef.current) {
-        candleRef.current.setData(history);
+      if (isActive && chartRef.current && candleRef.current && history.length > 0) {
+        try {
+          candleRef.current.setData(history);
+          liveLine.setData(history.map(c => ({ time: c.time, value: c.close })));
+          chart.timeScale().fitContent();
+        } catch (setErr) {
+          console.error("[LiveTradingChart] Error setting history data:", setErr);
+        }
       }
 
       const last = history[history.length - 1];
@@ -547,7 +603,7 @@ function LiveTradingChartComponent({
         renderedPriceRef.current = last.close;
         liveCandle.current      = { ...last };
         setDisplayPrice(last.close);
-        liveLine.setData(history.map(c => ({ time: c.time, value: c.close })));
+        setOhlcInfo({ o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume ?? 0 });
         
         if (indRefs.current.sma) indRefs.current.sma.setData(calculateSMA(history, 20));
         if (indRefs.current.ema) indRefs.current.ema.setData(calculateEMA(history, 55));
@@ -558,6 +614,8 @@ function LiveTradingChartComponent({
           indRefs.current.macdLine.setData(macd.map(m => ({ time: m.time, value: m.macd })));
           indRefs.current.macdSig.setData(macd.map(m => ({ time: m.time, value: m.signal })));
         }
+
+        onCandleUpdateRef.current?.(history);
       }
 
       try {
@@ -566,6 +624,7 @@ function LiveTradingChartComponent({
 
       setIsLoading(false);
       startEngine();
+      connectWS();
     };
 
     const RENDER_MS = 30; // ~33fps ultra-smooth fluid chart redraw just like Binance.com
@@ -696,14 +755,18 @@ function LiveTradingChartComponent({
                 const volume = parseFloat(k.v || "0");
                 
                 if (candleRef.current && close > 0) {
-                  try {
-                    candleRef.current.update({ time, open, high, low, close });
-                    liveLineRef.current?.update({ time, value: close });
-                  } catch {}
-                  const candle = { time, open, high, low, close, volume };
-                  liveCandle.current = candle;
-                  setOhlcInfo({ o: open, h: high, l: low, c: close, v: volume });
-                  appendOrUpdateCandle(candle);
+                  const hist = historyRef.current;
+                  const lastHist = hist.length > 0 ? hist[hist.length - 1] : null;
+                  if (!lastHist || time >= (lastHist.time as number)) {
+                    try {
+                      candleRef.current.update({ time, open, high, low, close });
+                      liveLineRef.current?.update({ time, value: close });
+                    } catch {}
+                    const candle = { time, open, high, low, close, volume };
+                    liveCandle.current = candle;
+                    setOhlcInfo({ o: open, h: high, l: low, c: close, v: volume });
+                    appendOrUpdateCandle(candle);
+                  }
                 }
                 onTickRef.current(close);
               }
@@ -730,9 +793,6 @@ function LiveTradingChartComponent({
     };
 
     loadHistory();
-    wsInitTimer = setTimeout(() => {
-      if (isActive) connectWS();
-    }, 150);
 
     return () => {
       isActive = false;
